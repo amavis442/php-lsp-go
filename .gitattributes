@@ -1,0 +1,2 @@
+# gofmt requires LF; without this, Windows checkouts get CRLF and fail the format check.
+* text=auto eol=lf
