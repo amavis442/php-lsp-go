@@ -24,18 +24,20 @@ func run() int {
 
 	logger := log.New(os.Stderr, "php-lsp-go: ", log.LstdFlags)
 	s := server.New(server.Info{Name: "php-lsp-go", Version: version}, logger)
-	return s.Serve(ctx, stdio{})
+	return s.Serve(ctx, stdio{in: openStdin()})
 }
 
 // stdio joins stdin and stdout into the io.ReadWriteCloser the transport
 // needs. Closing it closes both, which unblocks a pending read.
-type stdio struct{}
+type stdio struct {
+	in *os.File
+}
 
-func (stdio) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
-func (stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
+func (s stdio) Read(p []byte) (int, error) { return s.in.Read(p) }
+func (stdio) Write(p []byte) (int, error)  { return os.Stdout.Write(p) }
 
-func (stdio) Close() error {
-	inErr := os.Stdin.Close()
+func (s stdio) Close() error {
+	inErr := s.in.Close()
 	if err := os.Stdout.Close(); err != nil {
 		return err
 	}
