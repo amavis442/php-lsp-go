@@ -68,3 +68,28 @@ func TestSyntaxErrorsAreReportedAndClearedAfterAFix(t *testing.T) {
 		t.Errorf("stderr not empty:\n%s", p.stderr)
 	}
 }
+
+// Exiting right after an edit, before its diagnostics are due, must still
+// end cleanly with nothing on stderr.
+func TestExitRightAfterAnEditIsClean(t *testing.T) {
+	p := start(t)
+	p.initialize(t)
+
+	if err := p.client.Notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{
+		"uri": "file:///D:/work/a.php", "languageId": "php", "version": 1, "text": "<?php\n$x = ;\n",
+	}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+	if resp, err := p.client.Call("shutdown", nil); err != nil || resp.Error != nil {
+		t.Fatalf("shutdown: err=%v resp.Error=%+v", err, resp.Error)
+	}
+	if err := p.client.Notify("exit", nil); err != nil {
+		t.Fatalf("exit: %v", err)
+	}
+	if code := p.exitCode(t); code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	if p.stderr.Len() != 0 {
+		t.Errorf("stderr not empty:\n%s", p.stderr)
+	}
+}

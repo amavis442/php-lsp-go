@@ -40,6 +40,8 @@ type Publisher struct {
 	tokens  map[string]uint64 // the run allowed to publish for a uri
 	seq     uint64
 	stopped bool
+
+	running sync.WaitGroup // runs past their delay that may still send
 }
 
 // NewPublisher returns a publisher. encoding reports the position encoding
@@ -83,15 +85,31 @@ func (p *Publisher) DocumentClosed(docURI string) {
 	p.send(protocol.PublishDiagnosticsParams{URI: uri.URI(docURI), Diagnostics: []protocol.Diagnostic{}})
 }
 
-// Stop cancels all pending runs; later changes are ignored.
+// Stop cancels all pending runs and waits for runs in progress, whose
+// results are dropped; later changes are ignored. Once Stop returns, the
+// publisher sends nothing more.
 func (p *Publisher) Stop() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.stopped = true
 	for _, t := range p.timers {
 		t.Stop()
 	}
 	clear(p.timers)
+	p.mu.Unlock()
+
+	p.running.Wait()
+}
+
+// begin registers a run unless the publisher has stopped. It registers under
+// p.mu, so every run that Stop's Wait can miss sees stopped and gives up.
+func (p *Publisher) begin() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return false
+	}
+	p.running.Add(1)
+	return true
 }
 
 // claim stops the pending run for docURI and returns a token for a new one.
@@ -107,6 +125,11 @@ func (p *Publisher) claim(docURI string) uint64 {
 }
 
 func (p *Publisher) publish(docURI string, version int32, content string, token uint64) {
+	if !p.begin() {
+		return
+	}
+	defer p.running.Done()
+
 	diags, err := p.collector.Collect(content)
 	if err != nil {
 		p.log.Printf("diagnostics for %s: %v", docURI, err)

@@ -103,3 +103,28 @@ func TestClientNotifyBeforeServeFails(t *testing.T) {
 		t.Error("Notify before Serve succeeded, want error")
 	}
 }
+
+func TestBeforeCloseRunsWhileTheEditorIsStillConnected(t *testing.T) {
+	s := newTestServer()
+	s.BeforeClose(func() {
+		if err := s.Client().Notify(context.Background(), "test/bye", nil); err != nil {
+			t.Errorf("Notify in BeforeClose: %v", err)
+		}
+	})
+	c, done := serve(t, s)
+	initialize(t, c)
+
+	if resp, err := c.Call("shutdown", nil); err != nil || resp.Error != nil {
+		t.Fatalf("shutdown: err=%v resp.Error=%+v", err, resp.Error)
+	}
+	if err := c.Notify("exit", nil); err != nil {
+		t.Fatalf("exit: %v", err)
+	}
+
+	if _, err := c.WaitNotification("test/bye"); err != nil {
+		t.Errorf("test/bye: %v", err)
+	}
+	if code := waitExit(t, done); code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+}

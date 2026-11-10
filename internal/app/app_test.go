@@ -1,14 +1,17 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"log"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/amavis442/php-lsp-go/internal/core/php"
 	"github.com/amavis442/php-lsp-go/internal/server"
 	"github.com/amavis442/php-lsp-go/internal/testsupport/lspclient"
 )
@@ -32,11 +35,16 @@ type diagnostics struct {
 
 func start(t *testing.T) (*lspclient.Client, <-chan int) {
 	t.Helper()
+	return startApp(t, New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond))
+}
+
+// startApp serves a over a net.Pipe and returns an initialized client.
+func startApp(t *testing.T, a *App) (*lspclient.Client, <-chan int) {
+	t.Helper()
 	serverEnd, clientEnd := net.Pipe()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 
-	a := New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond)
 	done := make(chan int, 1)
 	go func() { done <- a.Serve(ctx, serverEnd) }()
 	t.Cleanup(func() { _ = clientEnd.Close() })
@@ -117,6 +125,75 @@ func TestEditingADocumentUpdatesItsSyntaxDiagnostics(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not stop after exit")
+	}
+}
+
+// syncBuffer is a bytes.Buffer that a run still in flight may write to while
+// the test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// stalledChecker holds every parse until release is closed, so a test can
+// end the session while diagnostics are still being computed.
+type stalledChecker struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s stalledChecker) SyntaxErrors([]byte) ([]php.SyntaxError, error) {
+	s.started <- struct{}{}
+	<-s.release
+	return nil, nil
+}
+
+func TestExitingWhileDiagnosticsAreInFlightLogsNothing(t *testing.T) {
+	var logs syncBuffer
+	checker := stalledChecker{started: make(chan struct{}), release: make(chan struct{})}
+	c, done := startApp(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(&logs, "", 0),
+		time.Millisecond, checker))
+	notify(t, c, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{
+		"uri": docURI, "languageId": "php", "version": 1, "text": "<?php\necho 1;\n",
+	}})
+	select {
+	case <-checker.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("diagnostics run did not start within 2s")
+	}
+
+	if _, err := c.Call("shutdown", nil); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	notify(t, c, "exit", nil)
+	// Keep reading, as an editor would, so a late publish cannot block on the pipe.
+	go func() { _, _ = c.WaitNotification("test/never") }()
+
+	select {
+	case <-done:
+		t.Fatal("session ended while a diagnostics run was still in progress")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(checker.release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not stop after exit")
+	}
+	if got := logs.String(); got != "" {
+		t.Errorf("server logged:\n%s", got)
 	}
 }
 
