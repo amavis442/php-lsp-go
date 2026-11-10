@@ -102,6 +102,49 @@ func TestNotifyOmitsID(t *testing.T) {
 	}
 }
 
+func TestWaitNotificationTakesQueuedMessageFirst(t *testing.T) {
+	var serverOutput bytes.Buffer
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "method": "a", "params": 1})
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "id": 1, "result": nil})
+	client := New(&serverOutput, &bytes.Buffer{})
+	if _, err := client.Call("x", nil); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	msg, err := client.WaitNotification("a")
+
+	if err != nil || string(msg.Params) != "1" {
+		t.Fatalf("WaitNotification = %+v, %v; want params 1", msg, err)
+	}
+	if notes := client.Notifications(); len(notes) != 0 {
+		t.Errorf("notification still queued after it was taken: %+v", notes)
+	}
+}
+
+func TestWaitNotificationReadsUntilMethodArrives(t *testing.T) {
+	var serverOutput bytes.Buffer
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "method": "other", "params": 1})
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "method": "wanted", "params": 2})
+	client := New(&serverOutput, &bytes.Buffer{})
+
+	msg, err := client.WaitNotification("wanted")
+
+	if err != nil || string(msg.Params) != "2" {
+		t.Fatalf("WaitNotification = %+v, %v; want params 2", msg, err)
+	}
+	if notes := client.Notifications(); len(notes) != 1 || notes[0].Method != "other" {
+		t.Errorf("notifications = %+v, want the skipped one kept", notes)
+	}
+}
+
+func TestWaitNotificationFailsWhenStreamEnds(t *testing.T) {
+	client := New(strings.NewReader(""), &bytes.Buffer{})
+
+	if _, err := client.WaitNotification("wanted"); err == nil {
+		t.Fatal("WaitNotification succeeded on an empty stream, want error")
+	}
+}
+
 func mustWrite(t *testing.T, buf *bytes.Buffer, v any) {
 	t.Helper()
 	if err := WriteMessage(buf, v); err != nil {

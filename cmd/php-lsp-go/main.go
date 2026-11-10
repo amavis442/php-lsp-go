@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/amavis442/php-lsp-go/internal/app"
+	diagnostics "github.com/amavis442/php-lsp-go/internal/features/diagnostics/presentation"
 	"github.com/amavis442/php-lsp-go/internal/server"
 )
 
@@ -23,8 +25,8 @@ func run() int {
 	defer stop()
 
 	logger := log.New(os.Stderr, "php-lsp-go: ", log.LstdFlags)
-	s := server.New(server.Info{Name: "php-lsp-go", Version: version}, logger)
-	return s.Serve(ctx, stdio{in: openStdin()})
+	a := app.New(server.Info{Name: "php-lsp-go", Version: version}, logger, diagnostics.DefaultDelay)
+	return a.Serve(ctx, stdio{in: openStdin()})
 }
 
 // stdio joins stdin and stdout into the io.ReadWriteCloser the transport
