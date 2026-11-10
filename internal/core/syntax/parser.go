@@ -34,18 +34,27 @@ func NewParser() *Parser {
 // SyntaxErrors parses src and returns its syntax errors in source order.
 // Each call parses the whole file; the tree is released before returning.
 func (p *Parser) SyntaxErrors(src []byte) ([]php.SyntaxError, error) {
+	var errs []php.SyntaxError
+	err := p.withTree(src, func(root *ts.Node) {
+		p.collect(root, src, &errs)
+	})
+	return errs, err
+}
+
+// withTree parses src and hands the root to use. The tree is released when
+// use returns, so use must not keep any node.
+func (p *Parser) withTree(src []byte, use func(root *ts.Node)) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	tree, err := p.parser.Parse(src)
 	if err != nil {
-		return nil, fmt.Errorf("parsing PHP: %w", err)
+		return fmt.Errorf("parsing PHP: %w", err)
 	}
 	defer tree.Release()
 
-	var errs []php.SyntaxError
-	p.collect(tree.RootNode(), src, &errs)
-	return errs, nil
+	use(tree.RootNode())
+	return nil
 }
 
 // collect walks only into subtrees that contain an error, so a valid file

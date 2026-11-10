@@ -15,6 +15,8 @@ import (
 	docdata "github.com/amavis442/php-lsp-go/internal/features/documents/data"
 	docdomain "github.com/amavis442/php-lsp-go/internal/features/documents/domain"
 	docpresentation "github.com/amavis442/php-lsp-go/internal/features/documents/presentation"
+	symdomain "github.com/amavis442/php-lsp-go/internal/features/symbols/domain"
+	sympresentation "github.com/amavis442/php-lsp-go/internal/features/symbols/presentation"
 	"github.com/amavis442/php-lsp-go/internal/server"
 )
 
@@ -26,11 +28,13 @@ type App struct {
 // New wires every feature into a server. diagnosticsDelay is how long a
 // document must be quiet before its diagnostics are published.
 func New(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration) *App {
-	return newApp(info, logger, diagnosticsDelay, syntax.NewParser())
+	parser := syntax.NewParser()
+	return newApp(info, logger, diagnosticsDelay, parser, parser)
 }
 
-// newApp is New with the syntax checker as a seam for tests.
-func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration, checker diagdomain.SyntaxChecker) *App {
+// newApp is New with the parser's roles as seams for tests.
+func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration,
+	checker diagdomain.SyntaxChecker, extractor symdomain.Extractor) *App {
 	s := server.New(info, logger)
 
 	publisher := diagpresentation.NewPublisher(
@@ -42,7 +46,22 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 	s.AddCapabilities(documents.Capabilities)
 	s.BeforeClose(publisher.Stop)
 
+	symbols := sympresentation.NewHandlers(symdomain.NewDocumentSymbols(documentText{docs}, extractor), s.Encoding)
+	symbols.Register(s.Router())
+	s.AddCapabilities(symbols.Capabilities)
+
 	return &App{server: s}
+}
+
+// documentText lets the symbols feature read open documents without
+// depending on the documents feature.
+type documentText struct {
+	docs *docdomain.Service
+}
+
+func (d documentText) Text(uri string) (string, bool) {
+	doc, ok := d.docs.Get(uri)
+	return doc.Text, ok
 }
 
 // Serve runs the session over rwc and returns the process exit code.

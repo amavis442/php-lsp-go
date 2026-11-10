@@ -1,0 +1,15 @@
+namespace App\Domain [5:1-54:2] name@5:11
+  class Money [9:1-16:2] name@10:22
+    constructor __construct [12:5-15:9] name@12:21
+      property $amount [13:9-13:27] name@13:20
+      property $currency [14:9-14:40] name@14:23
+  class Account [18:1-35:2] name@18:7
+    constant TYPE [20:5-20:40] name@20:25
+    property $balance [22:5-22:42] name@22:29
+    property $name [24:5-29:6] name@24:19
+    method deposit [31:5-34:6] name@31:21
+  enum Status [37:1-49:2] name@37:6
+    case Active [39:5-39:21] name@39:10
+    case Closed [40:5-40:21] name@40:10
+    method label [42:5-48:6] name@42:21
+  function make_account [51:1-54:2] name@51:10
