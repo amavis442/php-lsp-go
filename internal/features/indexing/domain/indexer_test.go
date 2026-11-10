@@ -100,9 +100,13 @@ type recordedProgress struct {
 	events []string
 }
 
-func (r *recordedProgress) Begin(total int)        { r.events = append(r.events, fmt.Sprintf("begin %d", total)) }
-func (r *recordedProgress) Report(done, total int) { r.events = append(r.events, fmt.Sprintf("%d/%d", done, total)) }
-func (r *recordedProgress) End()                   { r.events = append(r.events, "end") }
+func (r *recordedProgress) Begin(total int) {
+	r.events = append(r.events, fmt.Sprintf("begin %d", total))
+}
+func (r *recordedProgress) Report(done, total int) {
+	r.events = append(r.events, fmt.Sprintf("%d/%d", done, total))
+}
+func (r *recordedProgress) End() { r.events = append(r.events, "end") }
 
 var root = filepath.Join(string(filepath.Separator), "work")
 
