@@ -28,6 +28,8 @@ type Server struct {
 	life   lifecycle
 	client Client
 
+	running runningRequests
+
 	capabilities []func(*protocol.ServerCapabilities)
 	beforeClose  []func()
 
@@ -83,10 +85,11 @@ func (s *Server) Encoding() text.Encoding {
 // Serve runs the session over rwc until the client sends exit, the stream
 // closes or ctx is cancelled. It returns the process exit code.
 func (s *Server) Serve(ctx context.Context, rwc io.ReadWriteCloser) int {
-	conn := jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(rwc), jsonrpc2.WithCodec(codec{}))
+	conn := jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(rwc), jsonrpc2.WithCodec(codec{}),
+		jsonrpc2.WithPreempter(canceller{running: &s.running}))
 	s.client.connect(conn)
-	// Handlers run inline on the read loop, so messages are processed in the
-	// order the client sent them. Document edits depend on that order.
+	// Messages start in the order the client sent them; see handle for which
+	// of them may then run concurrently.
 	conn.Go(ctx, s.handle)
 
 	select {
@@ -101,16 +104,6 @@ func (s *Server) Serve(ctx context.Context, rwc io.ReadWriteCloser) int {
 		s.log.Printf("closing connection: %v", err)
 	}
 	return s.life.exitCode()
-}
-
-func (s *Server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error) {
-	if err := s.life.admit(req.Method()); err != nil {
-		if req.IsCall() {
-			return nil, err
-		}
-		return nil, nil // notifications outside the lifecycle are dropped
-	}
-	return s.router.Handle(ctx, req.Method(), req.Params(), req.IsCall())
 }
 
 func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {

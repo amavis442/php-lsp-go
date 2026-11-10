@@ -151,3 +151,80 @@ func mustWrite(t *testing.T, buf *bytes.Buffer, v any) {
 		t.Fatalf("WriteMessage: %v", err)
 	}
 }
+
+func TestServerRequestsAreAnsweredWithNullByDefault(t *testing.T) {
+	var serverOutput bytes.Buffer
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "id": "srv-1", "method": "client/registerCapability", "params": map[string]any{"registrations": []any{}}})
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "id": 1, "result": nil})
+	var clientOutput bytes.Buffer
+	client := New(&serverOutput, &clientOutput)
+
+	if _, err := client.Call("test/method", nil); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	r := bufio.NewReader(&clientOutput)
+	if _, err := ReadMessage(r); err != nil { // the request the client sent
+		t.Fatalf("reading sent request: %v", err)
+	}
+	reply, err := ReadMessage(r)
+	if err != nil {
+		t.Fatalf("reading reply: %v", err)
+	}
+	if want := `{"jsonrpc":"2.0","id":"srv-1","result":null}`; string(reply) != want {
+		t.Errorf("reply = %s, want %s", reply, want)
+	}
+	got := client.ServerRequests()
+	if len(got) != 1 || got[0].Method != "client/registerCapability" {
+		t.Errorf("server requests = %+v, want the registration", got)
+	}
+	if notes := client.Notifications(); len(notes) != 0 {
+		t.Errorf("server request queued as notification: %+v", notes)
+	}
+}
+
+func TestRespondSetsTheAnswerToAServerRequest(t *testing.T) {
+	var serverOutput bytes.Buffer
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "id": 7, "method": "workspace/configuration"})
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "method": "done"})
+	var clientOutput bytes.Buffer
+	client := New(&serverOutput, &clientOutput)
+	client.Respond("workspace/configuration", []any{map[string]int{"maxFiles": 5}})
+
+	if _, err := client.WaitNotification("done"); err != nil {
+		t.Fatalf("WaitNotification: %v", err)
+	}
+
+	reply, err := ReadMessage(bufio.NewReader(&clientOutput))
+	if err != nil {
+		t.Fatalf("reading reply: %v", err)
+	}
+	if want := `{"jsonrpc":"2.0","id":7,"result":[{"maxFiles":5}]}`; string(reply) != want {
+		t.Errorf("reply = %s, want %s", reply, want)
+	}
+}
+
+func TestSendAndAwaitAllowOverlappingRequests(t *testing.T) {
+	var serverOutput bytes.Buffer
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "id": 2, "result": "second"})
+	mustWrite(t, &serverOutput, map[string]any{"jsonrpc": "2.0", "id": 1, "result": "first"})
+	client := New(&serverOutput, &bytes.Buffer{})
+
+	first, err := client.Send("slow", nil)
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	second, err := client.Send("fast", nil)
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	got2, err := client.Await(second)
+	if err != nil || string(got2.Result) != `"second"` {
+		t.Fatalf("Await(second) = %+v, %v", got2, err)
+	}
+	got1, err := client.Await(first)
+	if err != nil || string(got1.Result) != `"first"` {
+		t.Errorf("Await(first) = %+v, %v; want the response read while awaiting second", got1, err)
+	}
+}
