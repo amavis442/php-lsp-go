@@ -100,3 +100,31 @@ func TestCancellingARequestKeepsTheSessionHealthy(t *testing.T) {
 		t.Errorf("stderr not empty:\n%s", p.stderr)
 	}
 }
+
+// Exiting while a request is still in flight ends the session cleanly.
+func TestExitWithARequestInFlightIsClean(t *testing.T) {
+	const uri = "file:///D:/work/a.php"
+	p := start(t)
+	p.initialize(t)
+	if err := p.client.Notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{
+		"uri": uri, "languageId": "php", "version": 1, "text": "<?php\nclass A {}\n",
+	}}); err != nil {
+		t.Fatalf("didOpen: %v", err)
+	}
+	if _, err := p.client.Send("textDocument/documentSymbol", map[string]any{"textDocument": map[string]any{"uri": uri}}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if resp, err := p.client.Call("shutdown", nil); err != nil || resp.Error != nil {
+		t.Fatalf("shutdown: err=%v resp.Error=%+v", err, resp.Error)
+	}
+	if err := p.client.Notify("exit", nil); err != nil {
+		t.Fatalf("exit: %v", err)
+	}
+	if code := p.exitCode(t); code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	if p.stderr.Len() != 0 {
+		t.Errorf("stderr not empty:\n%s", p.stderr)
+	}
+}
