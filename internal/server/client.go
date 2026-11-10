@@ -28,6 +28,21 @@ func (c *Client) Notify(ctx context.Context, method string, params any) error {
 	return conn.Notify(ctx, method, params)
 }
 
+// Call sends a request to the editor and waits for its answer, which is
+// decoded into result. Request handlers may use it. Notification handlers
+// must not: they run on the read loop that has to read the answer, so the
+// call would never return. Start a goroutine for that instead.
+func (c *Client) Call(ctx context.Context, method string, params, result any) error {
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	if conn == nil {
+		return errNotConnected
+	}
+	_, err := conn.Call(ctx, method, params, result)
+	return err
+}
+
 func (c *Client) connect(conn jsonrpc2.Conn) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
