@@ -29,3 +29,7 @@ The server speaks LSP over stdin and stdout.
 
 Written by Amavis442, pair-programmed with Claude (Anthropic). See
 [CONTRIBUTORS.md](CONTRIBUTORS.md).
+
+## License
+
+[MIT](LICENSE).
