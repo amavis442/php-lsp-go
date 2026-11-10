@@ -10,6 +10,8 @@ import (
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
+
+	"github.com/amavis442/php-lsp-go/internal/core/text"
 )
 
 // Info identifies the server in the initialize response.
@@ -24,6 +26,12 @@ type Server struct {
 	log    *log.Logger
 	router *Router
 	life   lifecycle
+	client Client
+
+	capabilities []func(*protocol.ServerCapabilities)
+
+	encMu    sync.Mutex
+	encoding text.Encoding
 
 	exitOnce sync.Once
 	exited   chan struct{}
@@ -48,10 +56,27 @@ func New(info Info, logger *log.Logger) *Server {
 // Router exposes the method registry so features can add their handlers.
 func (s *Server) Router() *Router { return s.router }
 
+// AddCapabilities lets a feature announce what it supports in the
+// initialize result. Call it before Serve.
+func (s *Server) AddCapabilities(contribute func(*protocol.ServerCapabilities)) {
+	s.capabilities = append(s.capabilities, contribute)
+}
+
+// Client sends notifications to the editor.
+func (s *Server) Client() *Client { return &s.client }
+
+// Encoding is the position encoding agreed in initialize; UTF-16 before that.
+func (s *Server) Encoding() text.Encoding {
+	s.encMu.Lock()
+	defer s.encMu.Unlock()
+	return s.encoding
+}
+
 // Serve runs the session over rwc until the client sends exit, the stream
 // closes or ctx is cancelled. It returns the process exit code.
 func (s *Server) Serve(ctx context.Context, rwc io.ReadWriteCloser) int {
 	conn := jsonrpc2.NewConn(jsonrpc2.NewHeaderStream(rwc), jsonrpc2.WithCodec(codec{}))
+	s.client.connect(conn)
 	// Handlers run inline on the read loop, so messages are processed in the
 	// order the client sent them. Document edits depend on that order.
 	conn.Go(ctx, s.handle)
@@ -77,9 +102,20 @@ func (s *Server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error)
 	return s.router.Handle(ctx, req.Method(), req.Params(), req.IsCall())
 }
 
-func (s *Server) initialize(_ context.Context, _ *protocol.InitializeParams) (*protocol.InitializeResult, error) {
+func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
+	enc, kind := negotiateEncoding(params)
+	s.encMu.Lock()
+	s.encoding = enc
+	s.encMu.Unlock()
+
+	capabilities := protocol.ServerCapabilities{PositionEncoding: kind}
+	for _, contribute := range s.capabilities {
+		contribute(&capabilities)
+	}
+
 	s.life.markInitialized()
 	return &protocol.InitializeResult{
+		Capabilities: capabilities,
 		ServerInfo: protocol.ServerInfo{
 			Name:    s.info.Name,
 			Version: protocol.NewOptional(s.info.Version),

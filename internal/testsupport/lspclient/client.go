@@ -94,8 +94,41 @@ func (c *Client) Notify(method string, params any) error {
 	return WriteMessage(c.w, notification{JSONRPC: "2.0", Method: method, Params: params})
 }
 
+// WaitNotification returns the first notification for method, taking it
+// from the queue or reading from the server until it arrives. Other
+// messages read meanwhile are kept for Notifications. It blocks until the
+// notification arrives or the stream ends.
+func (c *Client) WaitNotification(method string) (Message, error) {
+	c.mu.Lock()
+	for i, msg := range c.notifications {
+		if msg.Method == method {
+			c.notifications = append(c.notifications[:i], c.notifications[i+1:]...)
+			c.mu.Unlock()
+			return msg, nil
+		}
+	}
+	c.mu.Unlock()
+
+	for {
+		body, err := ReadMessage(c.r)
+		if err != nil {
+			return Message{}, fmt.Errorf("waiting for %s: %w", method, err)
+		}
+		var msg Message
+		if err := json.Unmarshal(body, &msg); err != nil {
+			return Message{}, fmt.Errorf("decoding %s: %w", body, err)
+		}
+		if msg.Method == method {
+			return msg, nil
+		}
+		c.mu.Lock()
+		c.notifications = append(c.notifications, msg)
+		c.mu.Unlock()
+	}
+}
+
 // Notifications returns the messages without a matching request that were
-// received while waiting in Call.
+// received while waiting in Call or WaitNotification.
 func (c *Client) Notifications() []Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()

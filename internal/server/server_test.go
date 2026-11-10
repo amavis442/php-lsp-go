@@ -12,15 +12,24 @@ import (
 	"github.com/amavis442/php-lsp-go/internal/testsupport/lspclient"
 )
 
+func newTestServer() *Server {
+	return New(Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0))
+}
+
 // session runs a Server in-process over a net.Pipe and returns a client for
 // the other end plus a channel that delivers Serve's exit code.
 func session(t *testing.T) (*lspclient.Client, <-chan int) {
+	t.Helper()
+	return serve(t, newTestServer())
+}
+
+// serve runs s, which the test may have configured, like session does.
+func serve(t *testing.T, s *Server) (*lspclient.Client, <-chan int) {
 	t.Helper()
 	serverEnd, clientEnd := net.Pipe()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 
-	s := New(Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0))
 	done := make(chan int, 1)
 	go func() { done <- s.Serve(ctx, serverEnd) }()
 	t.Cleanup(func() { _ = clientEnd.Close() })
