@@ -152,3 +152,47 @@ func TestStopCancelsPendingPublishes(t *testing.T) {
 
 	expectNothing(t, n, 150*time.Millisecond)
 }
+
+// blockingChecker reports when a run starts parsing and holds it there until
+// release is closed.
+type blockingChecker struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b blockingChecker) SyntaxErrors([]byte) ([]php.SyntaxError, error) {
+	b.started <- struct{}{}
+	<-b.release
+	return nil, nil
+}
+
+func TestStopWaitsForARunInProgressAndDropsItsResult(t *testing.T) {
+	checker := blockingChecker{started: make(chan struct{}), release: make(chan struct{})}
+	n := make(fakeNotifier, 10)
+	p := NewPublisher(domain.NewCollector(checker), n, func() text.Encoding { return text.UTF16 },
+		time.Millisecond, log.New(io.Discard, "", 0))
+	p.DocumentChanged(docURI, 1, "<?php $a")
+	select {
+	case <-checker.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not start within 2s")
+	}
+
+	stopped := make(chan struct{})
+	go func() { p.Stop(); close(stopped) }()
+
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while a run was still parsing")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(checker.release)
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after the run finished")
+	}
+	if len(n) != 0 {
+		t.Errorf("published %+v after Stop, want nothing", <-n)
+	}
+}

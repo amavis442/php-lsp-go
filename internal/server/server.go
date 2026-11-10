@@ -29,6 +29,7 @@ type Server struct {
 	client Client
 
 	capabilities []func(*protocol.ServerCapabilities)
+	beforeClose  []func()
 
 	encMu    sync.Mutex
 	encoding text.Encoding
@@ -62,6 +63,13 @@ func (s *Server) AddCapabilities(contribute func(*protocol.ServerCapabilities)) 
 	s.capabilities = append(s.capabilities, contribute)
 }
 
+// BeforeClose registers f to run when the session ends, before the
+// connection to the editor closes, so work that may still notify the editor
+// can finish first. Serve does not return until f does. Call it before Serve.
+func (s *Server) BeforeClose(f func()) {
+	s.beforeClose = append(s.beforeClose, f)
+}
+
 // Client sends notifications to the editor.
 func (s *Server) Client() *Client { return &s.client }
 
@@ -85,6 +93,9 @@ func (s *Server) Serve(ctx context.Context, rwc io.ReadWriteCloser) int {
 	case <-s.exited:
 	case <-conn.Done():
 	case <-ctx.Done():
+	}
+	for _, f := range s.beforeClose {
+		f()
 	}
 	if err := conn.Close(); err != nil {
 		s.log.Printf("closing connection: %v", err)

@@ -20,28 +20,32 @@ import (
 
 // App is a fully wired language server session.
 type App struct {
-	server    *server.Server
-	publisher *diagpresentation.Publisher
+	server *server.Server
 }
 
 // New wires every feature into a server. diagnosticsDelay is how long a
 // document must be quiet before its diagnostics are published.
 func New(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration) *App {
+	return newApp(info, logger, diagnosticsDelay, syntax.NewParser())
+}
+
+// newApp is New with the syntax checker as a seam for tests.
+func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration, checker diagdomain.SyntaxChecker) *App {
 	s := server.New(info, logger)
 
 	publisher := diagpresentation.NewPublisher(
-		diagdomain.NewCollector(syntax.NewParser()), s.Client(), s.Encoding, diagnosticsDelay, logger)
+		diagdomain.NewCollector(checker), s.Client(), s.Encoding, diagnosticsDelay, logger)
 
 	docs := docdomain.NewService(docdata.NewMemoryStore(), publisher)
 	documents := docpresentation.NewHandlers(docs, s.Encoding)
 	documents.Register(s.Router())
 	s.AddCapabilities(documents.Capabilities)
+	s.BeforeClose(publisher.Stop)
 
-	return &App{server: s, publisher: publisher}
+	return &App{server: s}
 }
 
 // Serve runs the session over rwc and returns the process exit code.
 func (a *App) Serve(ctx context.Context, rwc io.ReadWriteCloser) int {
-	defer a.publisher.Stop()
 	return a.server.Serve(ctx, rwc)
 }
