@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/amavis442/php-lsp-go/internal/core/php"
+	"github.com/amavis442/php-lsp-go/internal/core/syntax"
 	"github.com/amavis442/php-lsp-go/internal/server"
 	"github.com/amavis442/php-lsp-go/internal/testsupport/lspclient"
 )
@@ -164,7 +165,7 @@ func TestExitingWhileDiagnosticsAreInFlightLogsNothing(t *testing.T) {
 	var logs syncBuffer
 	checker := stalledChecker{started: make(chan struct{}), release: make(chan struct{})}
 	c, done := startApp(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(&logs, "", 0),
-		time.Millisecond, checker))
+		time.Millisecond, checker, syntax.NewParser()))
 	notify(t, c, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{
 		"uri": docURI, "languageId": "php", "version": 1, "text": "<?php\necho 1;\n",
 	}})
@@ -194,6 +195,43 @@ func TestExitingWhileDiagnosticsAreInFlightLogsNothing(t *testing.T) {
 	}
 	if got := logs.String(); got != "" {
 		t.Errorf("server logged:\n%s", got)
+	}
+}
+
+func TestDocumentSymbolsOutlineAnOpenDocument(t *testing.T) {
+	c, _ := start(t)
+	notify(t, c, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{
+		"uri": docURI, "languageId": "php", "version": 1,
+		"text": "<?php\nnamespace App;\nclass User {\n    public function name() {}\n}\n",
+	}})
+
+	resp, err := c.Call("textDocument/documentSymbol", map[string]any{"textDocument": map[string]any{"uri": docURI}})
+
+	if err != nil || resp.Error != nil {
+		t.Fatalf("documentSymbol: err=%v resp.Error=%+v", err, resp.Error)
+	}
+	type symbol struct {
+		Name           string `json:"name"`
+		Kind           int    `json:"kind"`
+		SelectionRange struct {
+			Start struct{ Line, Character int } `json:"start"`
+		} `json:"selectionRange"`
+		Children []symbol `json:"children"`
+	}
+	var got []symbol
+	if err := json.Unmarshal(resp.Result, &got); err != nil {
+		t.Fatalf("decoding %s: %v", resp.Result, err)
+	}
+	if len(got) != 1 || got[0].Name != "App" || got[0].Kind != 3 || len(got[0].Children) != 1 {
+		t.Fatalf("symbols = %s, want namespace App with one child", resp.Result)
+	}
+	class := got[0].Children[0]
+	if class.Name != "User" || class.Kind != 5 || len(class.Children) != 1 ||
+		class.Children[0].Name != "name" || class.Children[0].Kind != 6 {
+		t.Errorf("class = %+v, want class User with method name", class)
+	}
+	if s := class.Children[0].SelectionRange.Start; s.Line != 3 || s.Character != 20 {
+		t.Errorf("method name starts at %d:%d, want 3:20", s.Line, s.Character)
 	}
 }
 
