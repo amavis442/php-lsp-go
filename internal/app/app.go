@@ -22,6 +22,7 @@ import (
 	symdomain "github.com/amavis442/php-lsp-go/internal/features/symbols/domain"
 	sympresentation "github.com/amavis442/php-lsp-go/internal/features/symbols/presentation"
 	"github.com/amavis442/php-lsp-go/internal/server"
+	phpstormstubs "github.com/amavis442/php-lsp-go/third_party/phpstorm-stubs"
 )
 
 // App is a fully wired language server session.
@@ -30,15 +31,22 @@ type App struct {
 }
 
 // New wires every feature into a server. diagnosticsDelay is how long a
-// document must be quiet before its diagnostics are published.
-func New(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration) *App {
+// document must be quiet before its diagnostics are published. The built-in
+// PHP stubs are installed under cacheDir and indexed; an empty cacheDir
+// leaves them out.
+func New(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration, cacheDir string) *App {
 	parser := syntax.NewParser()
-	return newApp(info, logger, diagnosticsDelay, parser, parser)
+	var libraries idxpresentation.Libraries = noLibraries{}
+	if cacheDir != "" {
+		libraries = idxdata.NewStubs(phpstormstubs.Files, phpstormstubs.Version, cacheDir)
+	}
+	return newApp(info, logger, diagnosticsDelay, parser, parser, libraries)
 }
 
-// newApp is New with the parser's roles as seams for tests.
+// newApp is New with the parser's roles and the libraries as seams for
+// tests.
 func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration,
-	checker diagdomain.SyntaxChecker, extractor symdomain.Extractor) *App {
+	checker diagdomain.SyntaxChecker, extractor symdomain.Extractor, libraries idxpresentation.Libraries) *App {
 	s := server.New(info, logger)
 
 	publisher := diagpresentation.NewPublisher(
@@ -57,7 +65,7 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 	index := idxdata.NewMemoryIndex()
 	indexer := idxdomain.NewIndexer(idxdata.NewFileSystem(idxdata.DefaultExclude, idxdata.DefaultMaxSize),
 		func() idxdomain.Extractor { return syntax.NewParser() }, index, s.Encoding, runtime.NumCPU())
-	workspace := idxpresentation.NewWorkspace(indexer, s.Client(), logger)
+	workspace := idxpresentation.NewWorkspace(indexer, libraries, s.Client(), logger)
 	workspace.Register(s.Router())
 	s.OnInitialized(workspace.Start)
 	s.BeforeClose(workspace.Stop)
@@ -68,6 +76,11 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 
 	return &App{server: s}
 }
+
+// noLibraries is used when no libraries are indexed.
+type noLibraries struct{}
+
+func (noLibraries) Roots() ([]string, error) { return nil, nil }
 
 // documentText lets the symbols feature read open documents without
 // depending on the documents feature.

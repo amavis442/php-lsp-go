@@ -6,12 +6,14 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/amavis442/php-lsp-go/internal/core/fileuri"
 	"github.com/amavis442/php-lsp-go/internal/server"
 	"github.com/amavis442/php-lsp-go/internal/testsupport/lspclient"
+	phpstormstubs "github.com/amavis442/php-lsp-go/third_party/phpstorm-stubs"
 )
 
 type symbolInformation struct {
@@ -74,7 +76,7 @@ func TestTheWorkspaceIsIndexedAndSearchable(t *testing.T) {
 		"<?php\nnamespace App\\Models;\n\nclass User\n{\n    public function fullName(): string {}\n}\n")
 	writePHP(t, filepath.Join(root, "vendor", "acme", "lib", "Helpers.php"), "<?php\nfunction acme_user_helper() {}\n")
 
-	c, done := startAppWith(t, New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond),
+	c, done := startAppWith(t, New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond, ""),
 		map[string]any{
 			"processId": nil, "rootUri": fileuri.FromPath(root),
 			"capabilities": map[string]any{
@@ -120,5 +122,25 @@ func TestTheWorkspaceIsIndexedAndSearchable(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not stop after exit")
+	}
+}
+
+func TestBuiltInDeclarationsAreSearchable(t *testing.T) {
+	cache := t.TempDir()
+	c, _ := startAppWith(t, New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond, cache),
+		map[string]any{
+			"processId": nil, "rootUri": fileuri.FromPath(t.TempDir()),
+			"capabilities": map[string]any{"window": map[string]any{"workDoneProgress": true}},
+		})
+	waitIndexed(t, c)
+
+	got := workspaceSymbols(t, c, "str_contains")
+	stubs := fileuri.FromPath(filepath.Join(cache, "stubs", phpstormstubs.Version))
+	if len(got) == 0 || got[0].Name != "str_contains" || got[0].Kind != 12 ||
+		!strings.HasPrefix(got[0].Location.URI, stubs+"/") {
+		t.Fatalf("workspace/symbol(str_contains) = %+v, want the function from the stubs under %s", got, stubs)
+	}
+	if got := workspaceSymbols(t, c, "PDOStatement"); len(got) == 0 || got[0].Name != "PDOStatement" || got[0].Kind != 5 {
+		t.Errorf("workspace/symbol(PDOStatement) = %+v, want the class", got)
 	}
 }

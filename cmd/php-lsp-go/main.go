@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 
 	"github.com/amavis442/php-lsp-go/internal/app"
 	diagnostics "github.com/amavis442/php-lsp-go/internal/features/diagnostics/presentation"
@@ -25,8 +26,19 @@ func run() int {
 	defer stop()
 
 	logger := log.New(os.Stderr, "php-lsp-go: ", log.LstdFlags)
-	a := app.New(server.Info{Name: "php-lsp-go", Version: version}, logger, diagnostics.DefaultDelay)
+	a := app.New(server.Info{Name: "php-lsp-go", Version: version}, logger, diagnostics.DefaultDelay, cacheDir(logger))
 	return a.Serve(ctx, stdio{in: openStdin()})
+}
+
+// cacheDir is where the server keeps files between sessions, or "" when the
+// system has no cache directory.
+func cacheDir(logger *log.Logger) string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		logger.Printf("built-in PHP declarations are not indexed: %v", err)
+		return ""
+	}
+	return filepath.Join(dir, "php-lsp-go")
 }
 
 // stdio joins stdin and stdout into the io.ReadWriteCloser the transport

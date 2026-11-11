@@ -21,6 +21,12 @@ type Editor interface {
 	Notify(ctx context.Context, method string, params any) error
 }
 
+// Libraries provides read-only library code that is indexed with the
+// workspace, such as the built-in PHP stubs.
+type Libraries interface {
+	Roots() ([]string, error)
+}
+
 // fileChangeType values from the LSP specification.
 const fileDeleted = 3
 
@@ -35,9 +41,10 @@ type didChangeWatchedFilesParams struct {
 
 // Workspace keeps the index in step with the files of the workspace.
 type Workspace struct {
-	indexer *domain.Indexer
-	editor  Editor
-	log     *log.Logger
+	indexer   *domain.Indexer
+	libraries Libraries
+	editor    Editor
+	log       *log.Logger
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -49,17 +56,19 @@ type Workspace struct {
 	wake    chan struct{}
 }
 
-// NewWorkspace returns a workspace that fills indexer's index.
-func NewWorkspace(indexer *domain.Indexer, editor Editor, logger *log.Logger) *Workspace {
+// NewWorkspace returns a workspace that fills indexer's index with the
+// workspace files and the libraries.
+func NewWorkspace(indexer *domain.Indexer, libraries Libraries, editor Editor, logger *log.Logger) *Workspace {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Workspace{
-		indexer: indexer,
-		editor:  editor,
-		log:     logger,
-		ctx:     ctx,
-		cancel:  cancel,
-		scanned: make(chan struct{}),
-		wake:    make(chan struct{}, 1),
+		indexer:   indexer,
+		libraries: libraries,
+		editor:    editor,
+		log:       logger,
+		ctx:       ctx,
+		cancel:    cancel,
+		scanned:   make(chan struct{}),
+		wake:      make(chan struct{}, 1),
 	}
 }
 
@@ -101,15 +110,21 @@ func (w *Workspace) scan(session server.Session) {
 		}
 		roots = append(roots, path)
 	}
+
+	// Watch before scanning: a change during the scan then waits in pending
+	// and is applied after it, instead of being lost.
+	if len(roots) > 0 && session.WatchedFilesRegistration {
+		w.registerWatcher()
+	}
+	libraries, err := w.libraries.Roots()
+	if err != nil {
+		w.log.Printf("skipping libraries: %v", err)
+	}
+	roots = append(roots, libraries...)
 	if len(roots) == 0 {
 		return
 	}
 
-	// Watch before scanning: a change during the scan then waits in pending
-	// and is applied after it, instead of being lost.
-	if session.WatchedFilesRegistration {
-		w.registerWatcher()
-	}
 	var progress domain.Progress = silent{}
 	if session.WorkDoneProgress {
 		if p, err := newWorkDone(w.ctx, w.editor); err == nil {
