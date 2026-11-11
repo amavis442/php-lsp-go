@@ -1,6 +1,6 @@
-// Package domain finds the declarations a name in an open document refers
+// Package resolve finds the declarations a name in an open document refers
 // to.
-package domain
+package resolve
 
 import (
 	"strings"
@@ -26,37 +26,37 @@ type SymbolLookup interface {
 	Lookup(key string) []php.WorkspaceSymbol
 }
 
-// Definitions answers goto-definition.
-type Definitions struct {
+// Resolver finds the declarations a name refers to, for goto-definition, hover and the like.
+type Resolver struct {
 	docs   DocumentSource
 	parser Parser
 	index  SymbolLookup
 }
 
-// NewDefinitions returns definitions that read documents from docs and
+// NewResolver returns a resolver that read documents from docs and
 // look declarations up in index.
-func NewDefinitions(docs DocumentSource, parser Parser, index SymbolLookup) *Definitions {
-	return &Definitions{docs: docs, parser: parser, index: index}
+func NewResolver(docs DocumentSource, parser Parser, index SymbolLookup) *Resolver {
+	return &Resolver{docs: docs, parser: parser, index: index}
 }
 
 // At returns the declarations the name at pos in the open document uri
 // refers to, with positions in enc. It returns nothing when the document
 // is not open, there is no name at pos, or nothing declares it.
-func (d *Definitions) At(uri string, pos text.Position, enc text.Encoding) ([]php.WorkspaceSymbol, error) {
-	src, ok := d.docs.Text(uri)
+func (r *Resolver) At(uri string, pos text.Position, enc text.Encoding) ([]php.WorkspaceSymbol, error) {
+	src, ok := r.docs.Text(uri)
 	if !ok {
 		return nil, nil
 	}
 	offset := text.NewLineIndex(src).Offset(pos, enc)
-	ref, ok, err := d.parser.ReferenceAt([]byte(src), offset)
+	ref, ok, err := r.parser.ReferenceAt([]byte(src), offset)
 	if err != nil || !ok {
 		return nil, err
 	}
-	summary, err := d.parser.Extract([]byte(src))
+	summary, err := r.parser.Extract([]byte(src))
 	if err != nil {
 		return nil, err
 	}
-	l := newOverlay(uri, php.Flatten(uri, src, summary.Declarations, enc), d.index)
+	l := newOverlay(uri, php.Flatten(uri, src, summary.Declarations, enc), r.index)
 
 	switch ref.Kind {
 	case php.RefClass:

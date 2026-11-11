@@ -6,8 +6,8 @@ import (
 
 	"go.lsp.dev/protocol"
 
+	"github.com/amavis442/php-lsp-go/internal/core/resolve"
 	"github.com/amavis442/php-lsp-go/internal/core/text"
-	"github.com/amavis442/php-lsp-go/internal/features/definition/domain"
 	"github.com/amavis442/php-lsp-go/internal/server"
 )
 
@@ -32,13 +32,13 @@ type location struct {
 
 // Handlers serves textDocument/definition.
 type Handlers struct {
-	definitions *domain.Definitions
+	definitions *resolve.Resolver
 	encoding    func() text.Encoding
 }
 
 // NewHandlers returns handlers that answer from definitions. encoding
 // reports the position encoding agreed with the editor.
-func NewHandlers(definitions *domain.Definitions, encoding func() text.Encoding) *Handlers {
+func NewHandlers(definitions *resolve.Resolver, encoding func() text.Encoding) *Handlers {
 	return &Handlers{definitions: definitions, encoding: encoding}
 }
 
