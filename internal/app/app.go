@@ -86,7 +86,7 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 // noLibraries is used when no libraries are indexed.
 type noLibraries struct{}
 
-func (noLibraries) Roots() ([]string, error) { return nil, nil }
+func (noLibraries) Roots(context.Context) ([]string, error) { return nil, nil }
 
 // documentText lets the symbols feature read open documents without
 // depending on the documents feature.

@@ -22,9 +22,10 @@ type Editor interface {
 }
 
 // Libraries provides read-only library code that is indexed with the
-// workspace, such as the built-in PHP stubs.
+// workspace, such as the built-in PHP stubs. Roots may have to prepare
+// them first and stops when ctx is cancelled.
 type Libraries interface {
-	Roots() ([]string, error)
+	Roots(ctx context.Context) ([]string, error)
 }
 
 // fileChangeType values from the LSP specification.
@@ -116,7 +117,10 @@ func (w *Workspace) scan(session server.Session) {
 	if len(roots) > 0 && session.WatchedFilesRegistration {
 		w.registerWatcher()
 	}
-	libraries, err := w.libraries.Roots()
+	libraries, err := w.libraries.Roots(w.ctx)
+	if w.ctx.Err() != nil {
+		return // the session is ending
+	}
 	if err != nil {
 		w.log.Printf("skipping libraries: %v", err)
 	}
