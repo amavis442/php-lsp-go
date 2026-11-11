@@ -41,7 +41,7 @@ func TestHoverShowsSignaturesAndDocs(t *testing.T) {
 
 	uri := fileURI(filepath.Join(root, "app", "Http", "Pay.php"))
 	src := "<?php\nnamespace App\\Http;\n\nuse App\\Billing\\Invoice;\n\n" +
-		"function pay(Invoice $invoice): array\n{\n    return array_map(fn($x) => $x, []);\n}\n"
+		"function pay(Invoice $invoice): array\n{\n    return array_map(fn($x) => $x, []);\n}\nget_required_files();\n"
 	if err := p.client.Notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{
 		"uri": uri, "languageId": "php", "version": 1, "text": src,
 	}}); err != nil {
@@ -78,6 +78,11 @@ func TestHoverShowsSignaturesAndDocs(t *testing.T) {
 		"Applies the callback to the elements of the given arrays"
 	if got := hover(7, 13); got != want {
 		t.Errorf("array_map:\n got %q\nwant %q", got, want)
+	}
+	// "get_required_files" on line 9: the stub's summary is HTML.
+	want = "```php\n<?php\nfunction get_required_files(): array\n```\n\nAlias of **get_included_files**"
+	if got := hover(9, 3); got != want {
+		t.Errorf("get_required_files:\n got %q\nwant %q", got, want)
 	}
 
 	if resp, err := p.client.Call("shutdown", nil); err != nil || resp.Error != nil {
