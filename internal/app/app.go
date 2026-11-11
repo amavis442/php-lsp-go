@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/amavis442/php-lsp-go/internal/core/syntax"
+	defdomain "github.com/amavis442/php-lsp-go/internal/features/definition/domain"
+	defpresentation "github.com/amavis442/php-lsp-go/internal/features/definition/presentation"
 	diagdomain "github.com/amavis442/php-lsp-go/internal/features/diagnostics/domain"
 	diagpresentation "github.com/amavis442/php-lsp-go/internal/features/diagnostics/presentation"
 	docdata "github.com/amavis442/php-lsp-go/internal/features/documents/data"
@@ -73,6 +75,10 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 	workspaceSymbols := sympresentation.NewWorkspaceHandlers(symdomain.NewWorkspaceSymbols(index, symdomain.DefaultLimit))
 	workspaceSymbols.Register(s.Router())
 	s.AddCapabilities(workspaceSymbols.Capabilities)
+
+	definitions := defpresentation.NewHandlers(defdomain.NewDefinitions(documentText{docs}, syntax.NewParser(), index), s.Encoding)
+	definitions.Register(s.Router())
+	s.AddCapabilities(definitions.Capabilities)
 
 	return &App{server: s}
 }
