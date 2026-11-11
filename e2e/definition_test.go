@@ -47,7 +47,8 @@ func TestDefinitionJumpsToProjectClassesAndBuiltIns(t *testing.T) {
 
 	uri := fileURI(filepath.Join(root, "app", "Http", "Pay.php"))
 	src := "<?php\nnamespace App\\Http;\n\nuse App\\Billing\\Invoice;\n\n" +
-		"function pay(Invoice $invoice): array\n{\n    return array_map(fn($x) => $x, []);\n}\n"
+		"function pay(Invoice $invoice): array\n{\n    return array_map(fn($x) => $x, []);\n}\n" +
+		"enum Kind: string\n{\n    case A = 'a';\n}\n\nKind::tryFrom('a');\n"
 	if err := p.client.Notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{
 		"uri": uri, "languageId": "php", "version": 1, "text": src,
 	}}); err != nil {
@@ -79,6 +80,11 @@ func TestDefinitionJumpsToProjectClassesAndBuiltIns(t *testing.T) {
 	stub := fileURI(filepath.Join(p.cache, "stubs", "v2026.2", "standard", "standard_9.php"))
 	if got := define(7, 13); len(got) != 1 || got[0].URI != stub {
 		t.Errorf("array_map: %+v, want %s", got, stub)
+	}
+	// "Kind::tryFrom" on line 14: an enum method from the built-in BackedEnum.
+	enumStub := fileURI(filepath.Join(p.cache, "stubs", "v2026.2", "Core", "Core_c.php"))
+	if got := define(14, 8); len(got) != 1 || got[0].URI != enumStub {
+		t.Errorf("Kind::tryFrom: %+v, want BackedEnum::tryFrom in %s", got, enumStub)
 	}
 
 	if resp, err := p.client.Call("shutdown", nil); err != nil || resp.Error != nil {
