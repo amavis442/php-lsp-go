@@ -88,6 +88,28 @@ func describeAt(t *testing.T, marked string) string {
 	return d.Signature + " | " + d.Summary
 }
 
+func TestDescribeLeavesOutParameterAttributesAndParametersOfOldPHPVersions(t *testing.T) {
+	src := `<?php
+function array_map(
+    ?callable $callback,
+    #[PhpStormStubsElementAvailable(from: '8.0')] array $array,
+    #[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] $arrays,
+    array ...$arrays
+): array {}
+function login(#[\SensitiveParameter] string $password, #[\JetBrains\PhpStorm\Internal\PhpStormStubsElementAvailable(to: '7.4')] $old = null): bool {}
+`
+	tests := []struct{ name, want string }{
+		{"array_map", "function array_map(?callable $callback, array $array, array ...$arrays): array"},
+		{"login", "function login(string $password): bool"},
+	}
+	for _, tt := range tests {
+		d, ok, err := NewParser().Describe([]byte(src), strings.Index(src, "function "+tt.name)+len("function "))
+		if err != nil || !ok || d.Signature != tt.want {
+			t.Errorf("%s: %q, %v, %v\nwant %q", tt.name, d.Signature, ok, err, tt.want)
+		}
+	}
+}
+
 func TestDescribe(t *testing.T) {
 	tests := []struct{ at, want string }{
 		{"class §User", "final class User extends Model implements Authenticatable | A person who can sign in.\n\nUsers belong to one team."},

@@ -35,6 +35,13 @@ type extractor struct {
 	scope *php.Scope
 }
 
+// attributed are the declarations that may carry attributes.
+var attributed = map[string]bool{
+	"class_declaration": true, "interface_declaration": true, "trait_declaration": true,
+	"enum_declaration": true, "function_definition": true, "method_declaration": true,
+	"property_declaration": true, "const_declaration": true, "enum_case": true,
+}
+
 // classLikes are the declarations whose body holds members.
 var classLikes = map[string]php.SymbolKind{
 	"class_declaration":     php.KindClass,
@@ -83,6 +90,9 @@ func (x extractor) program(root *ts.Node) []php.Declaration {
 // statements (such as if blocks) that are not declarations themselves.
 func (x extractor) declarations(n *ts.Node) []php.Declaration {
 	t := x.kind(n)
+	if attributed[t] && x.removedInLaterPHP(n) {
+		return nil // the stubs keep it for older PHP versions only
+	}
 	if kind, ok := classLikes[t]; ok {
 		return x.classLike(n, kind)
 	}

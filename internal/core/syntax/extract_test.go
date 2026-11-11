@@ -309,6 +309,27 @@ class C extends Base implements O {}`,
 	}
 }
 
+func TestExtractLeavesOutDeclarationsOfOldPHPVersions(t *testing.T) {
+	src := `<?php
+#[Pure]
+#[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')]
+function array_combine(array $keys, array $values): array|false {}
+#[PhpStormStubsElementAvailable(from: '8.0')]
+function array_combine(array $keys, array $values): array {}
+class C {
+    #[PhpStormStubsElementAvailable(to: '7.4')]
+    public function old() {}
+    public function current() {}
+}`
+
+	got := outline(extract(t, src), src)
+
+	want := "function array_combine [5:1-6:61] name@6:10\nclass C [7:1-11:2] name@7:7\n  method current [10:5-10:33] name@10:21\n"
+	if got != want {
+		t.Errorf("outline:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestDefineSpansTheCallAndNamesTheString(t *testing.T) {
 	src := "<?php\ndefine('PHP_EOL', \"\\n\");\n"
 

@@ -125,20 +125,34 @@ func (x extractor) signature(n *ts.Node, end int) string {
 	return oneLine(x.withoutComments(n, start, max(start, end)))
 }
 
-// withoutComments is the source between start and end with the comments
-// inside n left out, such as docblocks of promoted parameters.
+// withoutComments is the source between start and end with what a reader
+// of the signature does not need left out: comments (such as docblocks of
+// promoted parameters), attributes, and parameters of old PHP versions.
 func (x extractor) withoutComments(n *ts.Node, start, end int) string {
 	var b strings.Builder
 	at := start
+	skip := func(from, to int) {
+		b.Write(x.src[at:from])
+		at = to
+	}
 	var walk func(*ts.Node)
 	walk = func(c *ts.Node) {
 		if int(c.StartByte()) >= end || int(c.EndByte()) <= at {
 			return
 		}
-		if x.kind(c) == "comment" {
-			b.Write(x.src[at:c.StartByte()])
-			at = int(c.EndByte())
+		switch x.kind(c) {
+		case "comment", "attribute_list":
+			skip(int(c.StartByte()), int(c.EndByte()))
 			return
+		case "simple_parameter", "variadic_parameter", "property_promotion_parameter":
+			if x.removedInLaterPHP(c) {
+				to := int(c.EndByte())
+				if next := c.NextSibling(); next != nil && x.kind(next) == "," {
+					to = int(next.EndByte())
+				}
+				skip(int(c.StartByte()), to)
+				return
+			}
 		}
 		for i := range c.NamedChildCount() {
 			walk(c.NamedChild(i))
@@ -149,6 +163,24 @@ func (x extractor) withoutComments(n *ts.Node, start, end int) string {
 		b.Write(x.src[at:end])
 	}
 	return b.String()
+}
+
+// removedInLaterPHP reports whether the stubs mark declaration or
+// parameter p as gone in later PHP versions: PhpStormStubsElementAvailable
+// with an upper bound. Without the project's PHP version, the latest is
+// assumed.
+func (x extractor) removedInLaterPHP(p *ts.Node) bool {
+	for i := range p.NamedChildCount() {
+		c := p.NamedChild(i)
+		if x.kind(c) != "attribute_list" {
+			continue
+		}
+		attr := strings.Join(strings.Fields(x.text(c)), "")
+		if strings.Contains(attr, "PhpStormStubsElementAvailable(") && strings.Contains(attr, "to:") {
+			return true
+		}
+	}
+	return false
 }
 
 // oneLine collapses the whitespace of multi-line parameter lists and drops
