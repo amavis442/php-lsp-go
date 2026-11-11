@@ -5,8 +5,11 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -36,21 +39,26 @@ type App struct {
 
 // New wires every feature into a server. diagnosticsDelay is how long a
 // document must be quiet before its diagnostics are published. The built-in
-// PHP stubs are installed under cacheDir and indexed; an empty cacheDir
-// leaves them out.
+// PHP stubs are installed under cacheDir and indexed, and workspace scans
+// are kept there for the next start; an empty cacheDir leaves both out.
 func New(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration, cacheDir string) *App {
 	parser := syntax.NewParser()
 	var libraries idxpresentation.Libraries = noLibraries{}
+	cache := noCache
 	if cacheDir != "" {
 		libraries = idxdata.NewStubs(phpstormstubs.Files, phpstormstubs.Version, cacheDir)
+		if build := buildID(); build != "" {
+			cache = idxdata.NewFileCache(filepath.Join(cacheDir, "index"), build)
+		}
 	}
-	return newApp(info, logger, diagnosticsDelay, parser, parser, libraries)
+	return newApp(info, logger, diagnosticsDelay, parser, parser, libraries, cache)
 }
 
-// newApp is New with the parser's roles and the libraries as seams for
-// tests.
+// newApp is New with the parser's roles, the libraries and the scan cache
+// as seams for tests.
 func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration,
-	checker diagdomain.SyntaxChecker, extractor symdomain.Extractor, libraries idxpresentation.Libraries) *App {
+	checker diagdomain.SyntaxChecker, extractor symdomain.Extractor, libraries idxpresentation.Libraries,
+	cache idxdomain.Cache) *App {
 	s := server.New(info, logger)
 
 	publisher := diagpresentation.NewPublisher(
@@ -69,7 +77,7 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 	index := idxdata.NewMemoryIndex()
 	files := idxdata.NewFileSystem(idxdata.DefaultExclude, idxdata.DefaultMaxSize)
 	indexer := idxdomain.NewIndexer(files,
-		func() idxdomain.Extractor { return syntax.NewParser() }, index, s.Encoding, runtime.NumCPU())
+		func() idxdomain.Extractor { return syntax.NewParser() }, index, s.Encoding, runtime.NumCPU(), cache)
 	workspace := idxpresentation.NewWorkspace(indexer, libraries, s.Client(), logger)
 	workspace.Register(s.Router())
 	s.OnInitialized(workspace.Start)
@@ -93,6 +101,24 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 	s.AddCapabilities(hover.Capabilities)
 
 	return &App{server: s}
+}
+
+// noCache keeps no scans.
+var noCache idxdomain.Cache = idxdomain.NoCache{}
+
+// buildID identifies this build of the server by the size and time of its
+// executable, so scans cached by another build, which may extract
+// differently, are not used. It is empty when the executable is unknown.
+func buildID() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	info, err := os.Stat(exe)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d-%d", info.Size(), info.ModTime().UnixNano())
 }
 
 // noLibraries is used when no libraries are indexed.

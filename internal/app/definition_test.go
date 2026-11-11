@@ -62,7 +62,7 @@ func TestDefinitionsAcrossTheWorkspaceTheStubsAndTheOpenDocument(t *testing.T) {
 	}, "test", t.TempDir())
 	parser := syntax.NewParser()
 	c, _ := startAppWith(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0),
-		time.Millisecond, parser, parser, stubs),
+		time.Millisecond, parser, parser, stubs, noCache),
 		map[string]any{
 			"processId": nil, "rootUri": fileuri.FromPath(root),
 			"capabilities": map[string]any{"window": map[string]any{"workDoneProgress": true}},
@@ -112,7 +112,7 @@ func TestEnumMethodsComeFromTheBuiltInEnumInterfaces(t *testing.T) {
 	}, "test", t.TempDir())
 	parser := syntax.NewParser()
 	c, _ := startAppWith(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0),
-		time.Millisecond, parser, parser, stubs),
+		time.Millisecond, parser, parser, stubs, noCache),
 		map[string]any{
 			"processId": nil, "rootUri": fileuri.FromPath(root),
 			"capabilities": map[string]any{"window": map[string]any{"workDoneProgress": true}},
