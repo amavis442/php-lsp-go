@@ -110,7 +110,7 @@ func TestWorkspaceSymbolsFindBuiltInDeclarations(t *testing.T) {
 		t.Fatalf("listing the installed stubs: %v", err)
 	}
 
-	for query, kind := range map[string]int{"array_map": 12, "ArrayIterator": 5, "Stringable": 11} {
+	for query, kind := range map[string]int{"array_map": 12, "ArrayIterator": 5, "Stringable": 11, "PHP_EOL": 14} {
 		resp, err := p.client.Call("workspace/symbol", map[string]any{"query": query})
 		if err != nil || resp.Error != nil {
 			t.Fatalf("workspace/symbol: err=%v resp.Error=%+v\nstderr:\n%s", err, resp.Error, p.stderr)

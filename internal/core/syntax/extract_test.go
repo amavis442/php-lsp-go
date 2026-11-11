@@ -136,6 +136,51 @@ function fallback
 `,
 		},
 		{
+			name: "constants made with define",
+			src: `<?php
+define('APP_VERSION', '1.0');
+\define("DEBUG", true);
+DEFINE('LOUD', 1);
+if (!defined('MAYBE')) {
+    define('MAYBE', 2);
+}
+function boot() { define('BOOTED', true); }
+define($dynamic, 1);
+define("WITH_$suffix", 1);
+define('Vendor\QUALIFIED', 1);
+defined('ONLY_CHECKED');
+$object->define('METHOD', 1);
+Foo::define('STATIC', 1);`,
+			want: `constant APP_VERSION
+constant DEBUG
+constant LOUD
+constant MAYBE
+function boot
+  constant BOOTED
+`,
+		},
+		{
+			// define always makes a global constant, which a namespace in
+			// the outline would misname.
+			name: "define in a namespace statement is left out",
+			src: `<?php
+namespace App;
+define('IN_NAMESPACE', 1);
+function boot() { define('ALSO_IN_NAMESPACE', 1); }`,
+			want: `namespace App
+  function boot
+`,
+		},
+		{
+			name: "define in a braced namespace is left out",
+			src: `<?php
+namespace App { define('BRACED', 1); }
+namespace { define('GLOBAL_AGAIN', 1); }`,
+			want: `namespace App
+constant GLOBAL_AGAIN
+`,
+		},
+		{
 			name: "namespace statements group what follows them",
 			src: `<?php
 namespace App\Models;
@@ -185,6 +230,16 @@ function alsoKept
 				t.Errorf("outline:\n%s\nwant:\n%s", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDefineSpansTheCallAndNamesTheString(t *testing.T) {
+	src := "<?php\ndefine('PHP_EOL', \"\\n\");\n"
+
+	got := outline(extract(t, src), src)
+
+	if want := "constant PHP_EOL [2:1-2:24] name@2:9\n"; got != want {
+		t.Errorf("outline = %q, want %q", got, want)
 	}
 }
 

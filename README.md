@@ -11,7 +11,7 @@ tree-sitter-php grammar.
 - Syntax diagnostics
 - Document symbols (outline)
 - Workspace symbols, from an index of the whole project including `vendor/`
-  and the functions and classes built into PHP
+  and the functions, classes and constants built into PHP
 
 Goto-definition and hover are planned.
 
