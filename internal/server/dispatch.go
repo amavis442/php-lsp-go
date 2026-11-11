@@ -48,29 +48,54 @@ func (s *Server) handle(ctx context.Context, req *jsonrpc2.Request) (any, error)
 	return result, err
 }
 
-// runningRequests can cancel the requests that run concurrently.
+// runningRequests can cancel the requests that run concurrently, and wait
+// for them.
 type runningRequests struct {
 	mu      sync.Mutex
 	cancels map[jsonrpc2.ID]context.CancelFunc
+	wg      sync.WaitGroup
+	closing bool // set by cancelAll; later requests start cancelled
 }
 
 // start registers request id and returns its cancellable context and a
-// function to call when it has finished.
+// function to call when it has finished. Once the session is ending, the
+// context is cancelled from the start and the request is not waited for.
 func (r *runningRequests) start(ctx context.Context, id jsonrpc2.ID) (context.Context, func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	r.mu.Lock()
+	if r.closing {
+		r.mu.Unlock()
+		cancel()
+		return ctx, func() {}
+	}
 	if r.cancels == nil {
 		r.cancels = make(map[jsonrpc2.ID]context.CancelFunc)
 	}
 	r.cancels[id] = cancel
+	r.wg.Add(1)
 	r.mu.Unlock()
 	return ctx, func() {
 		r.mu.Lock()
 		delete(r.cancels, id)
 		r.mu.Unlock()
 		cancel()
+		r.wg.Done()
 	}
 }
+
+// cancelAll cancels every running request and every request that starts
+// after it.
+func (r *runningRequests) cancelAll() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closing = true
+	for _, cancel := range r.cancels {
+		cancel()
+	}
+}
+
+// wait blocks until every running request has finished.
+func (r *runningRequests) wait() { r.wg.Wait() }
 
 // cancel cancels request id; an id that is not running is ignored.
 func (r *runningRequests) cancel(id jsonrpc2.ID) {

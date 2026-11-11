@@ -149,3 +149,22 @@ func TestRequestIDAcceptsNumbersAndStrings(t *testing.T) {
 		}
 	}
 }
+
+func TestARequestStartingAfterCancelAllStartsCancelled(t *testing.T) {
+	var r runningRequests
+	r.cancelAll()
+
+	ctx, done := r.start(context.Background(), jsonrpc2.NewNumberID(1))
+	defer done()
+
+	if ctx.Err() == nil {
+		t.Error("request started after cancelAll is not cancelled")
+	}
+	waited := make(chan struct{})
+	go func() { r.wait(); close(waited) }()
+	select {
+	case <-waited:
+	case <-time.After(time.Second):
+		t.Error("wait blocked on a request started after cancelAll")
+	}
+}

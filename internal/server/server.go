@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"sync"
+	"time"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -19,6 +20,9 @@ type Info struct {
 	Name    string
 	Version string
 }
+
+// DefaultCloseTimeout is how long each step of ending a session may take.
+const DefaultCloseTimeout = 2 * time.Second
 
 // Server is one LSP session.
 type Server struct {
@@ -36,6 +40,10 @@ type Server struct {
 	onInitialized []func(Session)
 	session       Session // set by initialize, read by initialized
 
+	// closeTimeout bounds each wait while the session ends, so work that
+	// ignores cancellation cannot keep the process alive.
+	closeTimeout time.Duration
+
 	encMu    sync.Mutex
 	encoding text.Encoding
 
@@ -47,10 +55,11 @@ type Server struct {
 // their methods on Router before Serve is called.
 func New(info Info, logger *log.Logger) *Server {
 	s := &Server{
-		info:   info,
-		log:    logger,
-		router: NewRouter(logger),
-		exited: make(chan struct{}),
+		info:         info,
+		log:          logger,
+		router:       NewRouter(logger),
+		closeTimeout: DefaultCloseTimeout,
+		exited:       make(chan struct{}),
 	}
 	HandleRequest(s.router, protocol.MethodInitialize, s.initialize)
 	HandleNotification(s.router, protocol.MethodInitialized, s.initialized)
@@ -70,7 +79,8 @@ func (s *Server) AddCapabilities(contribute func(*protocol.ServerCapabilities)) 
 
 // BeforeClose registers f to run when the session ends, before the
 // connection to the editor closes, so work that may still notify the editor
-// can finish first. Serve does not return until f does. Call it before Serve.
+// can finish first. Serve waits for f, but at most DefaultCloseTimeout.
+// Call it before Serve.
 func (s *Server) BeforeClose(f func()) {
 	s.beforeClose = append(s.beforeClose, f)
 }
@@ -108,13 +118,40 @@ func (s *Server) Serve(ctx context.Context, rwc io.ReadWriteCloser) int {
 	case <-conn.Done():
 	case <-ctx.Done():
 	}
-	for _, f := range s.beforeClose {
-		f()
-	}
-	if err := conn.Close(); err != nil {
-		s.log.Printf("closing connection: %v", err)
-	}
+	s.end(conn)
 	return s.life.exitCode()
+}
+
+// end tears the session down: running requests are cancelled and waited
+// for, then the BeforeClose hooks run, then the connection closes (which
+// itself waits for every handler). Each step waits at most closeTimeout, so
+// work that ignores cancellation cannot keep the process alive.
+func (s *Server) end(conn jsonrpc2.Conn) {
+	s.running.cancelAll()
+	s.within("requests still running", s.running.wait)
+	for _, f := range s.beforeClose {
+		s.within("a close hook did not finish", f)
+	}
+	s.within("the connection did not close", func() {
+		if err := conn.Close(); err != nil {
+			s.log.Printf("closing connection: %v", err)
+		}
+	})
+}
+
+// within runs f and waits at most closeTimeout for it. When f is slower it
+// logs what and carries on; f keeps running in the background.
+func (s *Server) within(what string, f func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f()
+	}()
+	select {
+	case <-done:
+	case <-time.After(s.closeTimeout):
+		s.log.Printf("%s after %s; ending the session anyway", what, s.closeTimeout)
+	}
 }
 
 func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
