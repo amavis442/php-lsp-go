@@ -36,7 +36,7 @@ type diagnostics struct {
 
 func start(t *testing.T) (*lspclient.Client, <-chan int) {
 	t.Helper()
-	return startApp(t, New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond))
+	return startApp(t, New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond, ""))
 }
 
 // startApp serves a over a net.Pipe and returns an initialized client.
@@ -171,7 +171,7 @@ func TestExitingWhileDiagnosticsAreInFlightLogsNothing(t *testing.T) {
 	var logs syncBuffer
 	checker := stalledChecker{started: make(chan struct{}), release: make(chan struct{})}
 	c, done := startApp(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(&logs, "", 0),
-		time.Millisecond, checker, syntax.NewParser()))
+		time.Millisecond, checker, syntax.NewParser(), noLibraries{}))
 	notify(t, c, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{
 		"uri": docURI, "languageId": "php", "version": 1, "text": "<?php\necho 1;\n",
 	}})
@@ -244,7 +244,7 @@ func TestDocumentSymbolsOutlineAnOpenDocument(t *testing.T) {
 func TestInitializeAnnouncesIncrementalSync(t *testing.T) {
 	serverEnd, clientEnd := net.Pipe()
 	t.Cleanup(func() { _ = clientEnd.Close() })
-	a := New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond)
+	a := New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 	go a.Serve(ctx, serverEnd)

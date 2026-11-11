@@ -24,6 +24,11 @@ func (p *Parser) Extract(src []byte) (php.FileSummary, error) {
 type extractor struct {
 	lang *ts.Language
 	src  []byte
+
+	// inNamespace is set inside a named namespace. define is left out
+	// there: it always makes a global constant, which the namespace would
+	// misname.
+	inNamespace bool
 }
 
 // classLikes are the declarations whose body holds members.
@@ -55,12 +60,11 @@ func (x extractor) program(root *ts.Node) []php.Declaration {
 			}
 			continue
 		}
-		decls := x.declarations(n)
 		if ns == nil {
-			out = append(out, decls...)
+			out = append(out, x.declarations(n)...)
 			continue
 		}
-		for _, d := range decls {
+		for _, d := range x.namespaced().declarations(n) {
 			ns.Children = append(ns.Children, d)
 			ns.End = max(ns.End, d.End)
 		}
@@ -89,6 +93,8 @@ func (x extractor) declarations(n *ts.Node) []php.Declaration {
 		return x.elements(n, "property_element", php.KindProperty)
 	case "enum_case":
 		return x.single(n, php.KindEnumCase)
+	case "function_call_expression":
+		return x.call(n)
 	case "anonymous_function", "arrow_function", "anonymous_class":
 		return nil // nameless, so not part of the outline
 	}
@@ -127,9 +133,85 @@ func (x extractor) bracedNamespace(n *ts.Node) []php.Declaration {
 		return x.children(body)
 	}
 	if body != nil {
-		d.Children = x.children(body)
+		d.Children = x.namespaced().children(body)
 	}
 	return []php.Declaration{d}
+}
+
+// namespaced returns the extractor for the inside of a named namespace.
+func (x extractor) namespaced() extractor {
+	x.inNamespace = true
+	return x
+}
+
+// call is define('NAME', value) with a literal name: a constant. Other
+// calls may hold declarations in their arguments.
+func (x extractor) call(n *ts.Node) []php.Declaration {
+	if !x.inNamespace && x.isDefine(n) {
+		if name := x.definedName(n); name != nil {
+			return []php.Declaration{{
+				Name:      string(x.src[name.StartByte():name.EndByte()]),
+				Kind:      php.KindConstant,
+				Start:     int(n.StartByte()),
+				End:       int(n.EndByte()),
+				NameStart: int(name.StartByte()),
+				NameEnd:   int(name.EndByte()),
+			}}
+		}
+	}
+	return x.children(n)
+}
+
+// isDefine reports whether call n calls the global function define. PHP
+// function names ignore case.
+func (x extractor) isDefine(n *ts.Node) bool {
+	fn := x.field(n, "function")
+	if fn == nil {
+		return false
+	}
+	switch x.kind(fn) {
+	case "name", "qualified_name":
+		name := strings.TrimPrefix(string(x.src[fn.StartByte():fn.EndByte()]), `\`)
+		return strings.EqualFold(name, "define")
+	}
+	return false
+}
+
+// definedName is the content of the string literal define names, when it
+// is a plain constant name: no interpolation, escapes or namespace.
+func (x extractor) definedName(n *ts.Node) *ts.Node {
+	args := x.field(n, "arguments")
+	if args == nil || args.NamedChildCount() == 0 {
+		return nil
+	}
+	arg := args.NamedChild(0)
+	if x.kind(arg) != "argument" || arg.NamedChildCount() != 1 {
+		return nil
+	}
+	lit := arg.NamedChild(0)
+	if k := x.kind(lit); (k != "string" && k != "encapsed_string") || lit.NamedChildCount() != 1 {
+		return nil
+	}
+	content := lit.NamedChild(0)
+	if x.kind(content) != "string_content" || !isIdentifier(x.src[content.StartByte():content.EndByte()]) {
+		return nil
+	}
+	return content
+}
+
+// isIdentifier reports whether b is a PHP name: a letter, underscore or
+// byte above 0x7f, followed by those or digits.
+func isIdentifier(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	for i, c := range b {
+		letter := c == '_' || c >= 0x80 || (c|0x20 >= 'a' && c|0x20 <= 'z')
+		if !letter && (i == 0 || c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // method lists constructor-promoted parameters as the properties they are.

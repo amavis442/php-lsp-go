@@ -6,10 +6,14 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/amavis442/php-lsp-go/internal/core/fileuri"
+	"github.com/amavis442/php-lsp-go/internal/core/syntax"
+	idxdata "github.com/amavis442/php-lsp-go/internal/features/indexing/data"
 	"github.com/amavis442/php-lsp-go/internal/server"
 	"github.com/amavis442/php-lsp-go/internal/testsupport/lspclient"
 )
@@ -74,7 +78,7 @@ func TestTheWorkspaceIsIndexedAndSearchable(t *testing.T) {
 		"<?php\nnamespace App\\Models;\n\nclass User\n{\n    public function fullName(): string {}\n}\n")
 	writePHP(t, filepath.Join(root, "vendor", "acme", "lib", "Helpers.php"), "<?php\nfunction acme_user_helper() {}\n")
 
-	c, done := startAppWith(t, New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond),
+	c, done := startAppWith(t, New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond, ""),
 		map[string]any{
 			"processId": nil, "rootUri": fileuri.FromPath(root),
 			"capabilities": map[string]any{
@@ -120,5 +124,32 @@ func TestTheWorkspaceIsIndexedAndSearchable(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not stop after exit")
+	}
+}
+
+// The real stubs are indexed end to end in the e2e tests; a small set keeps
+// this test quick under the race detector.
+func TestBuiltInDeclarationsAreSearchable(t *testing.T) {
+	cache := t.TempDir()
+	stubs := idxdata.NewStubs(fstest.MapFS{
+		"Core/Core.php":   {Data: []byte("<?php\nfunction str_contains(string $haystack, string $needle): bool {}\n")},
+		"PDO/PDO.php":     {Data: []byte("<?php\nclass PDOStatement {}\n")},
+		"Core/Core_d.php": {Data: []byte("<?php\ndefine('PHP_EOL', \"\\n\");\n")},
+	}, "test", cache)
+	parser := syntax.NewParser()
+	c, _ := startAppWith(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0),
+		time.Millisecond, parser, parser, stubs),
+		map[string]any{
+			"processId": nil, "rootUri": fileuri.FromPath(t.TempDir()),
+			"capabilities": map[string]any{"window": map[string]any{"workDoneProgress": true}},
+		})
+	waitIndexed(t, c)
+
+	root := fileuri.FromPath(filepath.Join(cache, "stubs", "test"))
+	for query, kind := range map[string]int{"str_contains": 12, "PDOStatement": 5, "PHP_EOL": 14} {
+		got := workspaceSymbols(t, c, query)
+		if len(got) == 0 || got[0].Name != query || got[0].Kind != kind || !strings.HasPrefix(got[0].Location.URI, root+"/") {
+			t.Errorf("workspace/symbol(%s) = %+v, want kind %d from the stubs under %s", query, got, kind, root)
+		}
 	}
 }

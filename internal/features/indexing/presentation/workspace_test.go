@@ -3,6 +3,7 @@ package presentation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -70,10 +71,20 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+// fakeLibraries hands out fixed library roots.
+type fakeLibraries struct {
+	roots []string
+	err   error
+}
+
+func (l *fakeLibraries) Roots() ([]string, error) { return l.roots, l.err }
+
 type fixture struct {
 	root      string
 	index     *data.MemoryIndex
 	editor    *fakeEditor
+	libraries *fakeLibraries
+	logs      *strings.Builder
 	workspace *Workspace
 	router    *server.Router
 }
@@ -81,17 +92,18 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	root := t.TempDir()
+	libraries := &fakeLibraries{}
 	index := data.NewMemoryIndex()
 	indexer := domain.NewIndexer(data.NewFileSystem(data.DefaultExclude, data.DefaultMaxSize),
 		func() domain.Extractor { return syntax.NewParser() }, index,
 		func() text.Encoding { return text.UTF8 }, 2)
 	editor := &fakeEditor{}
-	logger := log.New(io.Discard, "", 0)
-	w := NewWorkspace(indexer, editor, logger)
-	r := server.NewRouter(logger)
+	logs := &strings.Builder{}
+	w := NewWorkspace(indexer, libraries, editor, log.New(logs, "", 0))
+	r := server.NewRouter(log.New(io.Discard, "", 0))
 	w.Register(r)
 	t.Cleanup(w.Stop)
-	return &fixture{root: root, index: index, editor: editor, workspace: w, router: r}
+	return &fixture{root: root, index: index, editor: editor, libraries: libraries, logs: logs, workspace: w, router: r}
 }
 
 func (f *fixture) names() string {
@@ -188,6 +200,54 @@ func TestStartWithoutRootsIndexesNothing(t *testing.T) {
 
 	if f.index.Files() != 0 {
 		t.Errorf("indexed %d files, want none", f.index.Files())
+	}
+}
+
+func TestLibrariesAreIndexedWithTheWorkspace(t *testing.T) {
+	f := newFixture(t)
+	lib := t.TempDir()
+	f.libraries.roots = []string{lib}
+	writeFile(t, filepath.Join(f.root, "a.php"), "<?php\nclass A {}\n")
+	writeFile(t, filepath.Join(lib, "Core", "Core.php"), "<?php\nfunction strlen() {}\n")
+
+	f.workspace.Start(server.Session{Roots: []string{fileuri.FromPath(f.root)}})
+	waitScanned(t, f.workspace)
+
+	if got := f.names(); got != "A strlen" {
+		t.Errorf("indexed %q, want the workspace and the library", got)
+	}
+}
+
+func TestLibrariesAreIndexedWithoutAWorkspace(t *testing.T) {
+	f := newFixture(t)
+	lib := t.TempDir()
+	f.libraries.roots = []string{lib}
+	writeFile(t, filepath.Join(lib, "Core", "Core.php"), "<?php\nfunction strlen() {}\n")
+
+	f.workspace.Start(server.Session{WatchedFilesRegistration: true})
+	waitScanned(t, f.workspace)
+
+	if got := f.names(); got != "strlen" {
+		t.Errorf("indexed %q, want the library", got)
+	}
+	if calls, _ := f.editor.snapshot(); len(calls) != 0 {
+		t.Errorf("calls = %v; want no watcher without a workspace to watch", calls)
+	}
+}
+
+func TestLibrariesThatFailAreLoggedAndTheWorkspaceIsStillIndexed(t *testing.T) {
+	f := newFixture(t)
+	f.libraries.err = errors.New("disk full")
+	writeFile(t, filepath.Join(f.root, "a.php"), "<?php\nclass A {}\n")
+
+	f.workspace.Start(server.Session{Roots: []string{fileuri.FromPath(f.root)}})
+	waitScanned(t, f.workspace)
+
+	if got := f.names(); got != "A" {
+		t.Errorf("indexed %q, want the workspace", got)
+	}
+	if !strings.Contains(f.logs.String(), "disk full") {
+		t.Errorf("log = %q, want the library error", f.logs.String())
 	}
 }
 

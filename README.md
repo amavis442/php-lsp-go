@@ -11,6 +11,7 @@ tree-sitter-php grammar.
 - Syntax diagnostics
 - Document symbols (outline)
 - Workspace symbols, from an index of the whole project including `vendor/`
+  and the functions, classes and constants built into PHP
 
 Goto-definition and hover are planned.
 
@@ -34,3 +35,10 @@ Written by Amavis442, pair-programmed with Claude (Anthropic). See
 ## License
 
 [MIT](LICENSE).
+
+The declarations of PHP's built-in functions, classes and constants come from
+[JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs),
+licensed under Apache-2.0 (see
+[third_party/phpstorm-stubs/LICENSE](third_party/phpstorm-stubs/LICENSE)).
+They are embedded in the binary and written to the user cache directory
+(`php-lsp-go/stubs/<version>`) on first use, so the editor can open them.

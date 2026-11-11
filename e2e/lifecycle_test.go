@@ -48,6 +48,7 @@ type process struct {
 	cmd    *exec.Cmd
 	client *lspclient.Client
 	stderr *bytes.Buffer
+	cache  string // the server's cache directory
 }
 
 func start(t *testing.T) *process {
@@ -56,6 +57,10 @@ func start(t *testing.T) *process {
 	t.Cleanup(cancel)
 
 	cmd := exec.CommandContext(ctx, binary)
+	// Point the user cache directory (LOCALAPPDATA on Windows, XDG_CACHE_HOME
+	// on Linux) at a directory of the test's own.
+	cache := t.TempDir()
+	cmd.Env = append(os.Environ(), "LOCALAPPDATA="+cache, "XDG_CACHE_HOME="+cache)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +75,7 @@ func start(t *testing.T) *process {
 		t.Fatalf("starting server: %v", err)
 	}
 
-	return &process{cmd: cmd, client: lspclient.New(stdout, stdin), stderr: &stderr}
+	return &process{cmd: cmd, client: lspclient.New(stdout, stdin), stderr: &stderr, cache: filepath.Join(cache, "php-lsp-go")}
 }
 
 func (p *process) initialize(t *testing.T) {
