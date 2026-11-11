@@ -233,6 +233,70 @@ function alsoKept
 	}
 }
 
+func TestExtractResolvesWhatClassesBuildOn(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "through use statements and the namespace",
+			src: `<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Contracts\{Named, Auditable as Audit};
+use function Foo\Bar; // a function import does not name classes
+class User extends Model implements Named, Audit, \Countable, Bar {
+    use HasName, \Shared\Timestamps { HasName::name insteadof Timestamps; }
+}
+interface Repo extends Named, Base {}
+enum Status: string implements Named { use HasName; case A = 'a'; }
+trait HasName { use Other; }`,
+			want: `User extends [Illuminate\Database\Eloquent\Model] implements [Contracts\Named Contracts\Auditable Countable App\Models\Bar] traits [App\Models\HasName Shared\Timestamps]
+Repo extends [Contracts\Named App\Models\Base] implements [] traits []
+Status extends [] implements [Contracts\Named] traits [App\Models\HasName]
+HasName extends [] implements [] traits [App\Models\Other]
+`,
+		},
+		{
+			name: "each namespace statement starts without imports",
+			src: `<?php
+namespace A;
+use X\Base;
+class One extends Base {}
+namespace B;
+class Two extends Base {}`,
+			want: `One extends [X\Base] implements [] traits []
+Two extends [B\Base] implements [] traits []
+`,
+		},
+		{
+			name: "braced namespaces have their own imports",
+			src: `<?php
+namespace A { use X\Base; class One extends Base {} }
+namespace { class Two extends Base {} }`,
+			want: `One extends [X\Base] implements [] traits []
+Two extends [Base] implements [] traits []
+`,
+		},
+		{
+			name: "use groups with a namespace prefix",
+			src: `<?php
+use Vendor\Pkg\{Sub\Base, Other as O};
+class C extends Base implements O {}`,
+			want: `C extends [Vendor\Pkg\Sub\Base] implements [Vendor\Pkg\Other] traits []
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := relations(extract(t, tt.src)); got != tt.want {
+				t.Errorf("relations:\n%s\nwant:\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDefineSpansTheCallAndNamesTheString(t *testing.T) {
 	src := "<?php\ndefine('PHP_EOL', \"\\n\");\n"
 
@@ -338,4 +402,20 @@ func TestExtractGolden(t *testing.T) {
 			}
 		})
 	}
+}
+
+// relations renders what each class-like builds on, one per line.
+func relations(decls []php.Declaration) string {
+	var b strings.Builder
+	var walk func([]php.Declaration)
+	walk = func(ds []php.Declaration) {
+		for _, d := range ds {
+			if len(d.Extends)+len(d.Implements)+len(d.Traits) > 0 {
+				fmt.Fprintf(&b, "%s extends %v implements %v traits %v\n", d.Name, d.Extends, d.Implements, d.Traits)
+			}
+			walk(d.Children)
+		}
+	}
+	walk(decls)
+	return b.String()
 }

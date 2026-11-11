@@ -13,7 +13,7 @@ import (
 func (p *Parser) Extract(src []byte) (php.FileSummary, error) {
 	var summary php.FileSummary
 	err := p.withTree(src, func(root *ts.Node) {
-		x := extractor{lang: p.lang, src: src}
+		x := extractor{lang: p.lang, src: src, scope: &php.Scope{}}
 		summary.Declarations = x.program(root)
 	})
 	return summary, err
@@ -29,6 +29,10 @@ type extractor struct {
 	// there: it always makes a global constant, which the namespace would
 	// misname.
 	inNamespace bool
+
+	// scope is the namespace and the imports at the statement being
+	// extracted; use statements add to it as they are met.
+	scope *php.Scope
 }
 
 // classLikes are the declarations whose body holds members.
@@ -55,8 +59,10 @@ func (x extractor) program(root *ts.Node) []php.Declaration {
 		n := root.NamedChild(i)
 		if x.kind(n) == "namespace_definition" && x.field(n, "body") == nil {
 			flush()
+			x.scope = &php.Scope{}
 			if d, ok := x.named(n, php.KindNamespace); ok {
 				ns = &d
+				x.scope.Namespace = d.Name
 			}
 			continue
 		}
@@ -78,9 +84,12 @@ func (x extractor) program(root *ts.Node) []php.Declaration {
 func (x extractor) declarations(n *ts.Node) []php.Declaration {
 	t := x.kind(n)
 	if kind, ok := classLikes[t]; ok {
-		return x.withBody(n, kind)
+		return x.classLike(n, kind)
 	}
 	switch t {
+	case "namespace_use_declaration":
+		x.imports(n, x.scope)
+		return nil
 	case "namespace_definition":
 		return x.bracedNamespace(n)
 	case "function_definition":
@@ -125,15 +134,46 @@ func (x extractor) withBody(n *ts.Node, kind php.SymbolKind) []php.Declaration {
 // adds nothing to the outline but its contents.
 func (x extractor) bracedNamespace(n *ts.Node) []php.Declaration {
 	body := x.field(n, "body")
+	inner := x
+	inner.scope = &php.Scope{}
 	d, ok := x.named(n, php.KindNamespace)
 	if !ok {
 		if body == nil {
 			return nil
 		}
-		return x.children(body)
+		return inner.children(body)
 	}
 	if body != nil {
-		d.Children = x.namespaced().children(body)
+		inner = inner.namespaced()
+		inner.scope.Namespace = d.Name
+		d.Children = inner.children(body)
+	}
+	return []php.Declaration{d}
+}
+
+// classLike is a class, interface, trait or enum with the names it builds
+// on: an interface's base clause lists the interfaces it extends, a
+// class's its parent; traits are the use statements in the body.
+func (x extractor) classLike(n *ts.Node, kind php.SymbolKind) []php.Declaration {
+	d, ok := x.named(n, kind)
+	if !ok {
+		return x.children(n)
+	}
+	for i := range n.NamedChildCount() {
+		switch c := n.NamedChild(i); x.kind(c) {
+		case "base_clause":
+			d.Extends = x.names(c)
+		case "class_interface_clause":
+			d.Implements = x.names(c)
+		}
+	}
+	if body := x.field(n, "body"); body != nil {
+		d.Children = x.children(body)
+		for i := range body.NamedChildCount() {
+			if c := body.NamedChild(i); x.kind(c) == "use_declaration" {
+				d.Traits = append(d.Traits, x.names(c)...)
+			}
+		}
 	}
 	return []php.Declaration{d}
 }
