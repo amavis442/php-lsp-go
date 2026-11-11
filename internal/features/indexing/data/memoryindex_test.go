@@ -72,3 +72,48 @@ func TestMemoryIndexIsSafeForConcurrentUse(t *testing.T) {
 		t.Errorf("Files() = %d, want 8", ix.Files())
 	}
 }
+
+func uris(symbols []php.WorkspaceSymbol) []string {
+	var out []string
+	for _, s := range symbols {
+		out = append(out, s.URI)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestLookupFindsSymbolsByKeyAcrossFiles(t *testing.T) {
+	ix := NewMemoryIndex()
+	user := php.WorkspaceSymbol{Name: "User", Kind: php.KindClass, Container: "App", URI: "file:///a.php"}
+	save := php.WorkspaceSymbol{Name: "save", Kind: php.KindMethod, Container: `App\User`, Member: true, URI: "file:///a.php"}
+	ix.Replace("file:///a.php", []php.WorkspaceSymbol{user, save})
+	ix.Replace("file:///b.php", []php.WorkspaceSymbol{{Name: "user", Kind: php.KindClass, Container: "app", URI: "file:///b.php"}})
+
+	if got := uris(ix.Lookup(php.ClassKey(`APP\USER`))); len(got) != 2 || got[0] != "file:///a.php" || got[1] != "file:///b.php" {
+		t.Errorf("Lookup(class App User) found %v, want both files", got)
+	}
+	if got := ix.Lookup(php.MemberKey(`App\User`, php.KindMethod, "Save")); len(got) != 1 || got[0].Name != "save" {
+		t.Errorf("Lookup(method save) = %+v", got)
+	}
+	if got := ix.Lookup(php.FunctionKey(`App\User`)); len(got) != 0 {
+		t.Errorf("Lookup(function App User) = %+v, want none", got)
+	}
+}
+
+func TestLookupForgetsReplacedAndRemovedFiles(t *testing.T) {
+	ix := NewMemoryIndex()
+	ix.Replace("file:///a.php", []php.WorkspaceSymbol{{Name: "Old", Kind: php.KindClass, URI: "file:///a.php"}})
+	ix.Replace("file:///b.php", []php.WorkspaceSymbol{{Name: "Gone", Kind: php.KindClass, URI: "file:///b.php"}})
+
+	ix.Replace("file:///a.php", []php.WorkspaceSymbol{{Name: "New", Kind: php.KindClass, URI: "file:///a.php"}})
+	ix.Remove("file:///b.php")
+
+	for _, name := range []string{"Old", "Gone"} {
+		if got := ix.Lookup(php.ClassKey(name)); len(got) != 0 {
+			t.Errorf("Lookup(%s) = %+v, want it forgotten", name, got)
+		}
+	}
+	if got := ix.Lookup(php.ClassKey("New")); len(got) != 1 {
+		t.Errorf("Lookup(New) = %+v", got)
+	}
+}
