@@ -254,8 +254,20 @@ enum Status: string implements Named { use HasName; case A = 'a'; }
 trait HasName { use Other; }`,
 			want: `User extends [Illuminate\Database\Eloquent\Model] implements [Contracts\Named Contracts\Auditable Countable App\Models\Bar] traits [App\Models\HasName Shared\Timestamps]
 Repo extends [Contracts\Named App\Models\Base] implements [] traits []
-Status extends [] implements [Contracts\Named] traits [App\Models\HasName]
+Status extends [] implements [Contracts\Named BackedEnum] traits [App\Models\HasName]
 HasName extends [] implements [] traits [App\Models\Other]
+`,
+		},
+		{
+			// Every enum implements UnitEnum; a backed one BackedEnum, which
+			// extends UnitEnum. They are global, whatever the namespace.
+			name: "enums implement the built-in enum interfaces",
+			src: `<?php
+namespace App;
+enum Suit { case Hearts; }
+enum Level: int { case Low = 1; }`,
+			want: `Suit extends [] implements [UnitEnum] traits []
+Level extends [] implements [BackedEnum] traits []
 `,
 		},
 		{

@@ -167,6 +167,9 @@ func (x extractor) classLike(n *ts.Node, kind php.SymbolKind) []php.Declaration 
 			d.Implements = x.names(c)
 		}
 	}
+	if kind == php.KindEnum {
+		d.Implements = append(d.Implements, x.enumInterface(n))
+	}
 	if body := x.field(n, "body"); body != nil {
 		d.Children = x.children(body)
 		for i := range body.NamedChildCount() {
@@ -337,3 +340,14 @@ func (x extractor) field(n *ts.Node, name string) *ts.Node {
 }
 
 func (x extractor) kind(n *ts.Node) string { return n.Type(x.lang) }
+
+// enumInterface is the built-in interface every enum implements: UnitEnum,
+// or BackedEnum (which extends it) when the enum has a backing type.
+func (x extractor) enumInterface(n *ts.Node) string {
+	for i := range n.NamedChildCount() {
+		if x.kind(n.NamedChild(i)) == "primitive_type" {
+			return "BackedEnum"
+		}
+	}
+	return "UnitEnum"
+}

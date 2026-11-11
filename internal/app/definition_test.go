@@ -101,3 +101,37 @@ func TestDefinitionsAcrossTheWorkspaceTheStubsAndTheOpenDocument(t *testing.T) {
 		t.Errorf("$user->touch needs types: %+v, want nothing", got)
 	}
 }
+
+func TestEnumMethodsComeFromTheBuiltInEnumInterfaces(t *testing.T) {
+	root := t.TempDir()
+	writePHP(t, filepath.Join(root, "src", "Level.php"),
+		"<?php\nnamespace App;\n\nenum Level: int\n{\n    case Low = 1;\n}\n")
+	stubs := idxdata.NewStubs(fstest.MapFS{
+		"Core/Core_c.php": {Data: []byte("<?php\ninterface UnitEnum\n{\n    public static function cases(): array;\n}\n" +
+			"interface BackedEnum extends UnitEnum\n{\n    public static function from(int|string $value): static;\n}\n")},
+	}, "test", t.TempDir())
+	parser := syntax.NewParser()
+	c, _ := startAppWith(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0),
+		time.Millisecond, parser, parser, stubs),
+		map[string]any{
+			"processId": nil, "rootUri": fileuri.FromPath(root),
+			"capabilities": map[string]any{"window": map[string]any{"workDoneProgress": true}},
+		})
+	waitIndexed(t, c)
+
+	src := "<?php\nnamespace App;\n\n$level = Level::from(1);\n$all = Level::cases();\n"
+	uri := fileuri.FromPath(filepath.Join(root, "src", "use.php"))
+	notify(t, c, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{
+		"uri": uri, "languageId": "php", "version": 1, "text": src,
+	}})
+
+	stub := "/stubs/test/Core/Core_c.php"
+	if got := definitionAt(t, c, uri, src, "Level::fr§om"); len(got) != 1 || !strings.HasSuffix(got[0].URI, stub) ||
+		got[0].Range.Start.Line != 7 {
+		t.Errorf("Level::from: %+v, want BackedEnum::from in the stub, line 7", got)
+	}
+	if got := definitionAt(t, c, uri, src, "Level::cas§es"); len(got) != 1 || !strings.HasSuffix(got[0].URI, stub) ||
+		got[0].Range.Start.Line != 3 {
+		t.Errorf("Level::cases: %+v, want UnitEnum::cases through BackedEnum, line 3", got)
+	}
+}
