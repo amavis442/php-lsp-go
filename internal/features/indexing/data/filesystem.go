@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/amavis442/php-lsp-go/internal/features/indexing/domain"
 )
 
 // DefaultExclude are the directories never indexed by default.
@@ -34,10 +36,10 @@ func NewFileSystem(exclude []string, maxSize int64) *FileSystem {
 	return &FileSystem{exclude: ex, maxSize: maxSize}
 }
 
-// Walk calls visit for every .php file under root. Symbolic links are not
-// followed, so a link cycle cannot trap the walk. Entries that cannot be
-// read below root are skipped.
-func (f *FileSystem) Walk(ctx context.Context, root string, visit func(path string) error) error {
+// Walk calls visit for every .php file under root, with its stamp.
+// Symbolic links are not followed, so a link cycle cannot trap the walk.
+// Entries that cannot be read below root are skipped.
+func (f *FileSystem) Walk(ctx context.Context, root string, visit func(path string, stamp domain.Stamp) error) error {
 	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -57,10 +59,11 @@ func (f *FileSystem) Walk(ctx context.Context, root string, visit func(path stri
 		if !d.Type().IsRegular() || !strings.EqualFold(filepath.Ext(p), ".php") {
 			return nil
 		}
-		if info, err := d.Info(); err != nil || info.Size() > f.maxSize {
+		info, err := d.Info()
+		if err != nil || info.Size() > f.maxSize {
 			return nil
 		}
-		return visit(p)
+		return visit(p, domain.Stamp{Size: info.Size(), ModTime: info.ModTime().UnixNano()})
 	})
 }
 

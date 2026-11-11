@@ -105,7 +105,7 @@ func newFixture(t *testing.T) *fixture {
 	index := data.NewMemoryIndex()
 	indexer := domain.NewIndexer(data.NewFileSystem(data.DefaultExclude, data.DefaultMaxSize),
 		func() domain.Extractor { return syntax.NewParser() }, index,
-		func() text.Encoding { return text.UTF8 }, 2)
+		func() text.Encoding { return text.UTF8 }, 2, domain.NoCache{})
 	editor := &fakeEditor{}
 	logs := &strings.Builder{}
 	w := NewWorkspace(indexer, libraries, editor, log.New(logs, "", 0))
