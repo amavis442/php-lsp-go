@@ -173,7 +173,9 @@ func TestTheOpenDocumentWinsOverTheIndex(t *testing.T) {
 			{Name: "Controller", Kind: php.KindClass, Start: 6, End: 7, NameStart: 6, NameEnd: 7},
 		}}},
 	}
-	const editorURI = "file:///d%3A/app/Controller.php" // how go.lsp.dev may spell it
+	// The same file spelled differently: canonical URIs decode escapes on
+	// every platform.
+	const editorURI = "file:///D%3A/app/Controller.php"
 	d := NewDefinitions(fakeDocs{editorURI: "<?php\nclass Controller {}\n"}, parser, fakeIndex{}.add(stale, other))
 
 	got, err := d.At(editorURI, text.Position{}, text.UTF8)
