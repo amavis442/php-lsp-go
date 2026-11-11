@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/amavis442/php-lsp-go/internal/core/fileuri"
+	"github.com/amavis442/php-lsp-go/internal/core/syntax"
+	idxdata "github.com/amavis442/php-lsp-go/internal/features/indexing/data"
 	"github.com/amavis442/php-lsp-go/internal/server"
 	"github.com/amavis442/php-lsp-go/internal/testsupport/lspclient"
-	phpstormstubs "github.com/amavis442/php-lsp-go/third_party/phpstorm-stubs"
 )
 
 type symbolInformation struct {
@@ -125,22 +127,29 @@ func TestTheWorkspaceIsIndexedAndSearchable(t *testing.T) {
 	}
 }
 
+// The real stubs are indexed end to end in the e2e tests; a small set keeps
+// this test quick under the race detector.
 func TestBuiltInDeclarationsAreSearchable(t *testing.T) {
 	cache := t.TempDir()
-	c, _ := startAppWith(t, New(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0), time.Millisecond, cache),
+	stubs := idxdata.NewStubs(fstest.MapFS{
+		"Core/Core.php":   {Data: []byte("<?php\nfunction str_contains(string $haystack, string $needle): bool {}\n")},
+		"PDO/PDO.php":     {Data: []byte("<?php\nclass PDOStatement {}\n")},
+		"Core/Core_d.php": {Data: []byte("<?php\ndefine('PHP_EOL', \"\\n\");\n")},
+	}, "test", cache)
+	parser := syntax.NewParser()
+	c, _ := startAppWith(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0),
+		time.Millisecond, parser, parser, stubs),
 		map[string]any{
 			"processId": nil, "rootUri": fileuri.FromPath(t.TempDir()),
 			"capabilities": map[string]any{"window": map[string]any{"workDoneProgress": true}},
 		})
 	waitIndexed(t, c)
 
-	got := workspaceSymbols(t, c, "str_contains")
-	stubs := fileuri.FromPath(filepath.Join(cache, "stubs", phpstormstubs.Version))
-	if len(got) == 0 || got[0].Name != "str_contains" || got[0].Kind != 12 ||
-		!strings.HasPrefix(got[0].Location.URI, stubs+"/") {
-		t.Fatalf("workspace/symbol(str_contains) = %+v, want the function from the stubs under %s", got, stubs)
-	}
-	if got := workspaceSymbols(t, c, "PDOStatement"); len(got) == 0 || got[0].Name != "PDOStatement" || got[0].Kind != 5 {
-		t.Errorf("workspace/symbol(PDOStatement) = %+v, want the class", got)
+	root := fileuri.FromPath(filepath.Join(cache, "stubs", "test"))
+	for query, kind := range map[string]int{"str_contains": 12, "PDOStatement": 5, "PHP_EOL": 14} {
+		got := workspaceSymbols(t, c, query)
+		if len(got) == 0 || got[0].Name != query || got[0].Kind != kind || !strings.HasPrefix(got[0].Location.URI, root+"/") {
+			t.Errorf("workspace/symbol(%s) = %+v, want kind %d from the stubs under %s", query, got, kind, root)
+		}
 	}
 }
