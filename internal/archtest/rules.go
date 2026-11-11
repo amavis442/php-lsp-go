@@ -17,7 +17,7 @@ const (
 )
 
 // Check returns one "<package> imports <import>" line per forbidden import:
-//   - pure packages (core/text, core/php, core/fileuri and every domain layer) import only
+//   - pure packages (core/text, core/php, core/fileuri, core/resolve and every domain layer) import only
 //     the standard library and other pure packages;
 //   - only internal/server and feature presentation layers use the LSP library;
 //   - only internal/core/syntax uses the parser library.
@@ -52,7 +52,7 @@ func allowed(module, rel, imp string) bool {
 }
 
 func isPure(rel string) bool {
-	return rel == "internal/core/text" || rel == "internal/core/php" || rel == "internal/core/fileuri" ||
+	return rel == "internal/core/text" || rel == "internal/core/php" || rel == "internal/core/fileuri" || rel == "internal/core/resolve" ||
 		strings.HasSuffix(rel, "/domain") || strings.Contains(rel, "/domain/")
 }
 

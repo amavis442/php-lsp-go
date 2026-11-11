@@ -1,4 +1,4 @@
-package domain
+package resolve
 
 import (
 	"strings"
@@ -66,10 +66,10 @@ func found(symbols []php.WorkspaceSymbol) string {
 	return strings.Join(out, ", ")
 }
 
-func definitionsOf(t *testing.T, parser *fakeParser, index fakeIndex) string {
+func resolved(t *testing.T, parser *fakeParser, index fakeIndex) string {
 	t.Helper()
-	d := NewDefinitions(fakeDocs{docURI: "<?php\n"}, parser, index)
-	got, err := d.At(docURI, text.Position{}, text.UTF8)
+	r := NewResolver(fakeDocs{docURI: "<?php\n"}, parser, index)
+	got, err := r.At(docURI, text.Position{}, text.UTF8)
 	if err != nil {
 		t.Fatalf("At: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestAClassIsFoundInTheIndex(t *testing.T) {
 	parser := &fakeParser{ok: true, ref: php.Reference{Kind: php.RefClass, Candidates: []string{`app\models\USER`}}}
 	index := fakeIndex{}.add(class(`App\Models`, "User", "file:///D:/app/User.php", nil, nil, nil))
 
-	if got := definitionsOf(t, parser, index); got != `App\Models User @file:///D:/app/User.php` {
+	if got := resolved(t, parser, index); got != `App\Models User @file:///D:/app/User.php` {
 		t.Errorf("found %q", got)
 	}
 }
@@ -90,16 +90,16 @@ func TestFunctionsAndConstantsTryTheNamespaceFirst(t *testing.T) {
 	local := php.WorkspaceSymbol{Name: "strlen", Kind: php.KindFunction, Container: "App", URI: "file:///D:/app/f.php"}
 	parser := &fakeParser{ok: true, ref: php.Reference{Kind: php.RefFunction, Candidates: []string{`App\strlen`, "strlen"}}}
 
-	if got := definitionsOf(t, parser, fakeIndex{}.add(global)); got != " strlen @file:///stubs/Core.php" {
+	if got := resolved(t, parser, fakeIndex{}.add(global)); got != " strlen @file:///stubs/Core.php" {
 		t.Errorf("without a namespaced function: %q", got)
 	}
-	if got := definitionsOf(t, parser, fakeIndex{}.add(global, local)); got != `App strlen @file:///D:/app/f.php` {
+	if got := resolved(t, parser, fakeIndex{}.add(global, local)); got != `App strlen @file:///D:/app/f.php` {
 		t.Errorf("with a namespaced function: %q", got)
 	}
 
 	eol := php.WorkspaceSymbol{Name: "PHP_EOL", Kind: php.KindConstant, URI: "file:///stubs/Core_d.php"}
 	parser.ref = php.Reference{Kind: php.RefConstant, Candidates: []string{`App\PHP_EOL`, "PHP_EOL"}}
-	if got := definitionsOf(t, parser, fakeIndex{}.add(eol)); got != " PHP_EOL @file:///stubs/Core_d.php" {
+	if got := resolved(t, parser, fakeIndex{}.add(eol)); got != " PHP_EOL @file:///stubs/Core_d.php" {
 		t.Errorf("constant: %q", got)
 	}
 }
@@ -136,7 +136,7 @@ func TestMembersAreFoundUpTheInheritanceChain(t *testing.T) {
 		parser := &fakeParser{ok: true, ref: php.Reference{
 			Kind: php.RefMember, Candidates: []string{"Child"}, Member: tt.name, MemberKind: tt.kind,
 		}}
-		got := definitionsOf(t, parser, index)
+		got := resolved(t, parser, index)
 		if want := tt.want; want != "" {
 			want += " @" + f
 			if got != want {
@@ -155,7 +155,7 @@ func TestInheritanceCyclesEnd(t *testing.T) {
 	)
 	parser := &fakeParser{ok: true, ref: php.Reference{Kind: php.RefMember, Candidates: []string{"A"}, Member: "x", MemberKind: php.KindMethod}}
 
-	if got := definitionsOf(t, parser, index); got != "" {
+	if got := resolved(t, parser, index); got != "" {
 		t.Errorf("found %q, want nothing", got)
 	}
 }
@@ -176,9 +176,9 @@ func TestTheOpenDocumentWinsOverTheIndex(t *testing.T) {
 	// The same file spelled differently: canonical URIs decode escapes on
 	// every platform.
 	const editorURI = "file:///D%3A/app/Controller.php"
-	d := NewDefinitions(fakeDocs{editorURI: "<?php\nclass Controller {}\n"}, parser, fakeIndex{}.add(stale, other))
+	r := NewResolver(fakeDocs{editorURI: "<?php\nclass Controller {}\n"}, parser, fakeIndex{}.add(stale, other))
 
-	got, err := d.At(editorURI, text.Position{}, text.UTF8)
+	got, err := r.At(editorURI, text.Position{}, text.UTF8)
 
 	if err != nil || len(got) != 2 {
 		t.Fatalf("At = %+v, %v; want the document's class and the other file's", got, err)
@@ -190,10 +190,10 @@ func TestTheOpenDocumentWinsOverTheIndex(t *testing.T) {
 
 func TestThePositionIsConvertedWithTheEncoding(t *testing.T) {
 	parser := &fakeParser{}
-	d := NewDefinitions(fakeDocs{docURI: "<?php\n$a = '😀'; x();\n"}, parser, fakeIndex{})
+	r := NewResolver(fakeDocs{docURI: "<?php\n$a = '😀'; x();\n"}, parser, fakeIndex{})
 
 	// "$a = '" is 6 units, the emoji 2 in UTF-16 but 4 bytes, "'; " 3.
-	if _, err := d.At(docURI, text.Position{Line: 1, Character: 11}, text.UTF16); err != nil {
+	if _, err := r.At(docURI, text.Position{Line: 1, Character: 11}, text.UTF16); err != nil {
 		t.Fatal(err)
 	}
 
@@ -204,12 +204,12 @@ func TestThePositionIsConvertedWithTheEncoding(t *testing.T) {
 
 func TestNothingIsFoundForAClosedDocumentOrWithoutAName(t *testing.T) {
 	parser := &fakeParser{}
-	d := NewDefinitions(fakeDocs{docURI: "<?php\n"}, parser, fakeIndex{})
+	r := NewResolver(fakeDocs{docURI: "<?php\n"}, parser, fakeIndex{})
 
-	if got, err := d.At("file:///closed.php", text.Position{}, text.UTF8); err != nil || got != nil || parser.asked {
+	if got, err := r.At("file:///closed.php", text.Position{}, text.UTF8); err != nil || got != nil || parser.asked {
 		t.Errorf("closed document: %+v, %v, parsed = %v", got, err, parser.asked)
 	}
-	if got, err := d.At(docURI, text.Position{}, text.UTF8); err != nil || got != nil {
+	if got, err := r.At(docURI, text.Position{}, text.UTF8); err != nil || got != nil {
 		t.Errorf("no name: %+v, %v", got, err)
 	}
 }

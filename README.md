@@ -16,8 +16,11 @@ tree-sitter-php grammar.
   members reached through a class name, `self`, `static`, `parent` or
   `$this`, following traits, parent classes and interfaces. Members of other
   objects (`$user->name()`) need type inference and are not resolved yet.
+- Hover for the same names: the declaration's signature, the class or
+  namespace it belongs to, and its PHPDoc summary.
 
-Hover is planned.
+Built-in declarations follow the latest PHP version; choosing the project's
+PHP version is not supported yet.
 
 ## Build and test
 

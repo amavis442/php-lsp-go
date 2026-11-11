@@ -10,14 +10,16 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/amavis442/php-lsp-go/internal/core/resolve"
 	"github.com/amavis442/php-lsp-go/internal/core/syntax"
-	defdomain "github.com/amavis442/php-lsp-go/internal/features/definition/domain"
 	defpresentation "github.com/amavis442/php-lsp-go/internal/features/definition/presentation"
 	diagdomain "github.com/amavis442/php-lsp-go/internal/features/diagnostics/domain"
 	diagpresentation "github.com/amavis442/php-lsp-go/internal/features/diagnostics/presentation"
 	docdata "github.com/amavis442/php-lsp-go/internal/features/documents/data"
 	docdomain "github.com/amavis442/php-lsp-go/internal/features/documents/domain"
 	docpresentation "github.com/amavis442/php-lsp-go/internal/features/documents/presentation"
+	hovdomain "github.com/amavis442/php-lsp-go/internal/features/hover/domain"
+	hovpresentation "github.com/amavis442/php-lsp-go/internal/features/hover/presentation"
 	idxdata "github.com/amavis442/php-lsp-go/internal/features/indexing/data"
 	idxdomain "github.com/amavis442/php-lsp-go/internal/features/indexing/domain"
 	idxpresentation "github.com/amavis442/php-lsp-go/internal/features/indexing/presentation"
@@ -65,7 +67,8 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 	s.AddCapabilities(symbols.Capabilities)
 
 	index := idxdata.NewMemoryIndex()
-	indexer := idxdomain.NewIndexer(idxdata.NewFileSystem(idxdata.DefaultExclude, idxdata.DefaultMaxSize),
+	files := idxdata.NewFileSystem(idxdata.DefaultExclude, idxdata.DefaultMaxSize)
+	indexer := idxdomain.NewIndexer(files,
 		func() idxdomain.Extractor { return syntax.NewParser() }, index, s.Encoding, runtime.NumCPU())
 	workspace := idxpresentation.NewWorkspace(indexer, libraries, s.Client(), logger)
 	workspace.Register(s.Router())
@@ -76,9 +79,18 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 	workspaceSymbols.Register(s.Router())
 	s.AddCapabilities(workspaceSymbols.Capabilities)
 
-	definitions := defpresentation.NewHandlers(defdomain.NewDefinitions(documentText{docs}, syntax.NewParser(), index), s.Encoding)
+	// Goto-definition and hover share a parser of their own, so they do not
+	// wait on diagnostics.
+	navParser := syntax.NewParser()
+	resolver := resolve.NewResolver(documentText{docs}, navParser, index)
+
+	definitions := defpresentation.NewHandlers(resolver, s.Encoding)
 	definitions.Register(s.Router())
 	s.AddCapabilities(definitions.Capabilities)
+
+	hover := hovpresentation.NewHandlers(hovdomain.NewHover(resolver, documentText{docs}, files, navParser), s.Encoding)
+	hover.Register(s.Router())
+	s.AddCapabilities(hover.Capabilities)
 
 	return &App{server: s}
 }

@@ -10,8 +10,8 @@ import (
 	"go.lsp.dev/protocol"
 
 	"github.com/amavis442/php-lsp-go/internal/core/php"
+	"github.com/amavis442/php-lsp-go/internal/core/resolve"
 	"github.com/amavis442/php-lsp-go/internal/core/text"
-	"github.com/amavis442/php-lsp-go/internal/features/definition/domain"
 	"github.com/amavis442/php-lsp-go/internal/server"
 )
 
@@ -60,7 +60,7 @@ func definition(t *testing.T, index fakeIndex, uri string, line, character int) 
 	t.Helper()
 	parser := &userClass{}
 	r := server.NewRouter(log.New(io.Discard, "", 0))
-	h := NewHandlers(domain.NewDefinitions(fakeDocs{docURI: "<?php\nnew User();\n"}, parser, index),
+	h := NewHandlers(resolve.NewResolver(fakeDocs{docURI: "<?php\nnew User();\n"}, parser, index),
 		func() text.Encoding { return text.UTF8 })
 	h.Register(r)
 	params, _ := json.Marshal(map[string]any{

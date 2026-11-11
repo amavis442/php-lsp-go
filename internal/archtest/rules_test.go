@@ -29,9 +29,17 @@ func TestCheckFlagsDomainImportingDataLayer(t *testing.T) {
 }
 
 func TestCheckAllowsDomainImportingPureCore(t *testing.T) {
-	pkgs := []Package{{Path: mod + "/internal/features/hover/domain", Imports: []string{"strings", mod + "/internal/core/php", mod + "/internal/core/text", mod + "/internal/core/fileuri"}}}
+	pkgs := []Package{{Path: mod + "/internal/features/hover/domain", Imports: []string{"strings", mod + "/internal/core/php", mod + "/internal/core/text", mod + "/internal/core/fileuri", mod + "/internal/core/resolve"}}}
 
 	assertViolations(t, Check(mod, pkgs))
+}
+
+func TestCheckKeepsResolvePure(t *testing.T) {
+	pkgs := []Package{{Path: mod + "/internal/core/resolve", Imports: []string{mod + "/internal/core/php", mod + "/internal/core/syntax"}}}
+
+	got := Check(mod, pkgs)
+
+	assertViolations(t, got, mod+"/internal/core/resolve imports "+mod+"/internal/core/syntax")
 }
 
 func TestCheckKeepsFileURIPure(t *testing.T) {
