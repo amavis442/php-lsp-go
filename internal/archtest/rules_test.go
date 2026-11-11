@@ -29,9 +29,17 @@ func TestCheckFlagsDomainImportingDataLayer(t *testing.T) {
 }
 
 func TestCheckAllowsDomainImportingPureCore(t *testing.T) {
-	pkgs := []Package{{Path: mod + "/internal/features/hover/domain", Imports: []string{"strings", mod + "/internal/core/php", mod + "/internal/core/text"}}}
+	pkgs := []Package{{Path: mod + "/internal/features/hover/domain", Imports: []string{"strings", mod + "/internal/core/php", mod + "/internal/core/text", mod + "/internal/core/fileuri"}}}
 
 	assertViolations(t, Check(mod, pkgs))
+}
+
+func TestCheckKeepsFileURIPure(t *testing.T) {
+	pkgs := []Package{{Path: mod + "/internal/core/fileuri", Imports: []string{"net/url", "go.lsp.dev/uri"}}}
+
+	got := Check(mod, pkgs)
+
+	assertViolations(t, got, mod+"/internal/core/fileuri imports go.lsp.dev/uri")
 }
 
 func TestCheckRestrictsProtocolLibraryToServerAndPresentation(t *testing.T) {

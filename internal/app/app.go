@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"runtime"
 	"time"
 
 	"github.com/amavis442/php-lsp-go/internal/core/syntax"
@@ -15,6 +16,9 @@ import (
 	docdata "github.com/amavis442/php-lsp-go/internal/features/documents/data"
 	docdomain "github.com/amavis442/php-lsp-go/internal/features/documents/domain"
 	docpresentation "github.com/amavis442/php-lsp-go/internal/features/documents/presentation"
+	idxdata "github.com/amavis442/php-lsp-go/internal/features/indexing/data"
+	idxdomain "github.com/amavis442/php-lsp-go/internal/features/indexing/domain"
+	idxpresentation "github.com/amavis442/php-lsp-go/internal/features/indexing/presentation"
 	symdomain "github.com/amavis442/php-lsp-go/internal/features/symbols/domain"
 	sympresentation "github.com/amavis442/php-lsp-go/internal/features/symbols/presentation"
 	"github.com/amavis442/php-lsp-go/internal/server"
@@ -49,6 +53,18 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 	symbols := sympresentation.NewHandlers(symdomain.NewDocumentSymbols(documentText{docs}, extractor), s.Encoding)
 	symbols.Register(s.Router())
 	s.AddCapabilities(symbols.Capabilities)
+
+	index := idxdata.NewMemoryIndex()
+	indexer := idxdomain.NewIndexer(idxdata.NewFileSystem(idxdata.DefaultExclude, idxdata.DefaultMaxSize),
+		func() idxdomain.Extractor { return syntax.NewParser() }, index, s.Encoding, runtime.NumCPU())
+	workspace := idxpresentation.NewWorkspace(indexer, s.Client(), logger)
+	workspace.Register(s.Router())
+	s.OnInitialized(workspace.Start)
+	s.BeforeClose(workspace.Stop)
+
+	workspaceSymbols := sympresentation.NewWorkspaceHandlers(symdomain.NewWorkspaceSymbols(index, symdomain.DefaultLimit))
+	workspaceSymbols.Register(s.Router())
+	s.AddCapabilities(workspaceSymbols.Capabilities)
 
 	return &App{server: s}
 }

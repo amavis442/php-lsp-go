@@ -42,6 +42,12 @@ func start(t *testing.T) (*lspclient.Client, <-chan int) {
 // startApp serves a over a net.Pipe and returns an initialized client.
 func startApp(t *testing.T, a *App) (*lspclient.Client, <-chan int) {
 	t.Helper()
+	return startAppWith(t, a, map[string]any{"processId": nil, "rootUri": nil, "capabilities": map[string]any{}})
+}
+
+// startAppWith is startApp with the initialize params given.
+func startAppWith(t *testing.T, a *App, params map[string]any) (*lspclient.Client, <-chan int) {
+	t.Helper()
 	serverEnd, clientEnd := net.Pipe()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
@@ -51,7 +57,7 @@ func startApp(t *testing.T, a *App) (*lspclient.Client, <-chan int) {
 	t.Cleanup(func() { _ = clientEnd.Close() })
 
 	c := lspclient.New(clientEnd, clientEnd)
-	resp, err := c.Call("initialize", map[string]any{"processId": nil, "rootUri": nil, "capabilities": map[string]any{}})
+	resp, err := c.Call("initialize", params)
 	if err != nil || resp.Error != nil {
 		t.Fatalf("initialize: err=%v resp.Error=%+v", err, resp.Error)
 	}

@@ -37,6 +37,9 @@ type Server struct {
 	capabilities []func(*protocol.ServerCapabilities)
 	beforeClose  []func()
 
+	onInitialized []func(Session)
+	session       Session // set by initialize, read by initialized
+
 	// closeTimeout bounds each wait while the session ends, so work that
 	// ignores cancellation cannot keep the process alive.
 	closeTimeout time.Duration
@@ -80,6 +83,14 @@ func (s *Server) AddCapabilities(contribute func(*protocol.ServerCapabilities)) 
 // Call it before Serve.
 func (s *Server) BeforeClose(f func()) {
 	s.beforeClose = append(s.beforeClose, f)
+}
+
+// OnInitialized registers f to run when the editor confirms initialization,
+// with what initialize learned about the editor. f runs on the read loop, so
+// it must return quickly: start a goroutine for long work. Call it before
+// Serve.
+func (s *Server) OnInitialized(f func(Session)) {
+	s.onInitialized = append(s.onInitialized, f)
 }
 
 // Client sends notifications to the editor.
@@ -149,6 +160,8 @@ func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams
 	s.encoding = enc
 	s.encMu.Unlock()
 
+	s.session = sessionFrom(params)
+
 	capabilities := protocol.ServerCapabilities{PositionEncoding: kind}
 	for _, contribute := range s.capabilities {
 		contribute(&capabilities)
@@ -164,7 +177,15 @@ func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams
 	}, nil
 }
 
-func (s *Server) initialized(context.Context, *protocol.InitializedParams) error { return nil }
+// initialized runs on the read loop after initialize, which also ran there
+// and wrote session; the read loop orders the two, so reading it needs no
+// lock.
+func (s *Server) initialized(context.Context, *protocol.InitializedParams) error {
+	for _, f := range s.onInitialized {
+		f(s.session)
+	}
+	return nil
+}
 
 func (s *Server) shutdown(context.Context, *struct{}) (any, error) {
 	s.life.markShutdown()

@@ -10,8 +10,9 @@ tree-sitter-php grammar.
 - Document synchronisation (incremental)
 - Syntax diagnostics
 - Document symbols (outline)
+- Workspace symbols, from an index of the whole project including `vendor/`
 
-Goto-definition, hover and workspace symbols are planned.
+Goto-definition and hover are planned.
 
 ## Build and test
 
