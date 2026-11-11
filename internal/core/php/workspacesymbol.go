@@ -9,7 +9,14 @@ type WorkspaceSymbol struct {
 	Name           string
 	Kind           SymbolKind
 	Container      string
+	Member         bool // Container is a class, not a namespace
 	URI            string
 	Range          text.Range
 	SelectionRange text.Range
+
+	// For classes, interfaces, traits and enums: the qualified names of
+	// what they build on.
+	Extends    []string // the parent class, or the interfaces an interface extends
+	Implements []string
+	Traits     []string
 }
