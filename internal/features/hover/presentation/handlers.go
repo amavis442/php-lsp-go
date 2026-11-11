@@ -74,8 +74,8 @@ func render(info domain.Info) string {
 	if info.Container != "" {
 		parts = append(parts, "`"+info.Container+"`")
 	}
-	if info.Summary != "" {
-		parts = append(parts, info.Summary)
+	if summary := docMarkdown(info.Summary); summary != "" {
+		parts = append(parts, summary)
 	}
 	return strings.Join(parts, "\n\n")
 }

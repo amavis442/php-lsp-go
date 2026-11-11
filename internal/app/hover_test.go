@@ -55,7 +55,7 @@ func TestHoverDescribesDeclarationsFromTheWorkspaceTheStubsAndTheOpenDocument(t 
 		"<?php\nnamespace App\\Models;\n\n/**\n * A person who can sign in.\n * @property string $email\n */\nclass User\n{\n"+
 			"    /** Saves the user. */\n    public function save(array $options = []): bool { return true; }\n}\n")
 	stubs := idxdata.NewStubs(fstest.MapFS{
-		"Core/Core.php": {Data: []byte("<?php\n/**\n * Get string length\n * @param string $string\n */\nfunction strlen(string $string): int {}\n")},
+		"Core/Core.php": {Data: []byte("<?php\n/**\n * Get <b>string</b> length\n * @param string $string\n */\nfunction strlen(string $string): int {}\n")},
 	}, "test", t.TempDir())
 	parser := syntax.NewParser()
 	c, _ := startAppWith(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(io.Discard, "", 0),
@@ -78,7 +78,7 @@ func TestHoverDescribesDeclarationsFromTheWorkspaceTheStubsAndTheOpenDocument(t 
 		{"show(Us§er $user", "```php\n<?php\nclass User\n```\n\n`App\\Models`\n\nA person who can sign in."},
 		{"User::sa§ve", "```php\n<?php\npublic function save(array $options = []): bool\n```\n\n`App\\Models\\User`\n\nSaves the user."},
 		{"$this->sh§ow", "```php\n<?php\npublic function show(User $user): int\n```\n\n`App\\Http\\Controller`\n\nShows one user."},
-		{"return str§len", "```php\n<?php\nfunction strlen(string $string): int\n```\n\nGet string length"},
+		{"return str§len", "```php\n<?php\nfunction strlen(string $string): int\n```\n\nGet **string** length"},
 		{"$cou§nt", "null"},
 	}
 	for _, tt := range tests {

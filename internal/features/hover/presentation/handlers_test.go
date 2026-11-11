@@ -97,6 +97,25 @@ func TestHoverLeavesOutWhatIsEmpty(t *testing.T) {
 	}
 }
 
+func TestHoverTurnsTheHTMLOfTheSummaryIntoMarkdown(t *testing.T) {
+	alias := php.WorkspaceSymbol{Name: "get_required_files", Kind: php.KindFunction, URI: docURI}
+
+	raw, _ := hover(t, []php.WorkspaceSymbol{alias},
+		php.Description{Signature: "function get_required_files(): array", Summary: "Alias of <b>get_included_files</b>"})
+
+	var got struct {
+		Contents struct {
+			Value string `json:"value"`
+		} `json:"contents"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decoding %s: %v", raw, err)
+	}
+	if want := "```php\n<?php\nfunction get_required_files(): array\n```\n\nAlias of **get_included_files**"; got.Contents.Value != want {
+		t.Errorf("value = %q, want %q", got.Contents.Value, want)
+	}
+}
+
 func TestHoverOfNothingIsNull(t *testing.T) {
 	raw, _ := hover(t, nil, php.Description{})
 
