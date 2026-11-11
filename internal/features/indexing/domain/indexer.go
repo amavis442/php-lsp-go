@@ -165,6 +165,6 @@ func (ix *Indexer) indexWith(extractor Extractor, path string) error {
 		return fmt.Errorf("parsing %s: %w", path, err)
 	}
 	uri := fileuri.FromPath(path)
-	ix.index.Replace(uri, flatten(uri, string(src), summary.Declarations, ix.encoding()))
+	ix.index.Replace(uri, php.Flatten(uri, string(src), summary.Declarations, ix.encoding()))
 	return nil
 }
