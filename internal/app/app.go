@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/amavis442/php-lsp-go/internal/core/syntax"
+	defdomain "github.com/amavis442/php-lsp-go/internal/features/definition/domain"
+	defpresentation "github.com/amavis442/php-lsp-go/internal/features/definition/presentation"
 	diagdomain "github.com/amavis442/php-lsp-go/internal/features/diagnostics/domain"
 	diagpresentation "github.com/amavis442/php-lsp-go/internal/features/diagnostics/presentation"
 	docdata "github.com/amavis442/php-lsp-go/internal/features/documents/data"
@@ -74,13 +76,17 @@ func newApp(info server.Info, logger *log.Logger, diagnosticsDelay time.Duration
 	workspaceSymbols.Register(s.Router())
 	s.AddCapabilities(workspaceSymbols.Capabilities)
 
+	definitions := defpresentation.NewHandlers(defdomain.NewDefinitions(documentText{docs}, syntax.NewParser(), index), s.Encoding)
+	definitions.Register(s.Router())
+	s.AddCapabilities(definitions.Capabilities)
+
 	return &App{server: s}
 }
 
 // noLibraries is used when no libraries are indexed.
 type noLibraries struct{}
 
-func (noLibraries) Roots() ([]string, error) { return nil, nil }
+func (noLibraries) Roots(context.Context) ([]string, error) { return nil, nil }
 
 // documentText lets the symbols feature read open documents without
 // depending on the documents feature.

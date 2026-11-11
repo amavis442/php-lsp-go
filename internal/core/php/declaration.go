@@ -28,6 +28,12 @@ type Declaration struct {
 	NameStart int
 	NameEnd   int
 	Children  []Declaration
+
+	// For classes, interfaces, traits and enums: the qualified names of
+	// what they build on.
+	Extends    []string // the parent class, or the interfaces an interface extends
+	Implements []string
+	Traits     []string
 }
 
 // FileSummary is what the server keeps of a parsed file.

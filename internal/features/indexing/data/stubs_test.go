@@ -1,6 +1,8 @@
 package data
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +26,7 @@ func readFile(t *testing.T, path string) string {
 func TestStubsAreInstalledUnderTheirVersion(t *testing.T) {
 	cache := t.TempDir()
 
-	roots, err := NewStubs(stubFiles, "v1", cache).Roots()
+	roots, err := NewStubs(stubFiles, "v1", cache).Roots(context.Background())
 
 	want := filepath.Join(cache, "stubs", "v1")
 	if err != nil || len(roots) != 1 || roots[0] != want {
@@ -40,7 +42,7 @@ func TestStubsAreInstalledUnderTheirVersion(t *testing.T) {
 
 func TestInstalledStubsAreNotWrittenAgain(t *testing.T) {
 	cache := t.TempDir()
-	if _, err := NewStubs(stubFiles, "v1", cache).Roots(); err != nil {
+	if _, err := NewStubs(stubFiles, "v1", cache).Roots(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	core := filepath.Join(cache, "stubs", "v1", "Core", "Core.php")
@@ -48,7 +50,7 @@ func TestInstalledStubsAreNotWrittenAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := NewStubs(stubFiles, "v1", cache).Roots(); err != nil {
+	if _, err := NewStubs(stubFiles, "v1", cache).Roots(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,11 +61,11 @@ func TestInstalledStubsAreNotWrittenAgain(t *testing.T) {
 
 func TestAnotherVersionIsInstalledBesideTheFirst(t *testing.T) {
 	cache := t.TempDir()
-	if _, err := NewStubs(stubFiles, "v1", cache).Roots(); err != nil {
+	if _, err := NewStubs(stubFiles, "v1", cache).Roots(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
-	roots, err := NewStubs(stubFiles, "v2", cache).Roots()
+	roots, err := NewStubs(stubFiles, "v2", cache).Roots(context.Background())
 
 	if err != nil || roots[0] != filepath.Join(cache, "stubs", "v2") {
 		t.Fatalf("Roots() = %v, %v", roots, err)
@@ -81,7 +83,7 @@ func TestAnUnfinishedInstallIsReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := NewStubs(stubFiles, "v1", cache).Roots(); err != nil {
+	if _, err := NewStubs(stubFiles, "v1", cache).Roots(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,7 +95,7 @@ func TestAnUnfinishedInstallIsReplaced(t *testing.T) {
 func TestInstallLeavesNoTemporaryDirectories(t *testing.T) {
 	cache := t.TempDir()
 
-	if _, err := NewStubs(stubFiles, "v1", cache).Roots(); err != nil {
+	if _, err := NewStubs(stubFiles, "v1", cache).Roots(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -112,7 +114,36 @@ func TestStubsReportAnUnusableCacheDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := NewStubs(stubFiles, "v1", file).Roots(); err == nil {
+	if _, err := NewStubs(stubFiles, "v1", file).Roots(context.Background()); err == nil {
 		t.Error("Roots() succeeded under a file; want an error")
+	}
+}
+
+func TestACancelledInstallStopsAndLeavesNothingBehind(t *testing.T) {
+	cache := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := NewStubs(stubFiles, "v1", cache).Roots(ctx)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Roots() error = %v, want context.Canceled", err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(cache, "stubs"))
+	if len(entries) != 0 {
+		t.Errorf("stubs directory holds %v, want nothing", entries)
+	}
+}
+
+func TestACancelledContextDoesNotHideAnInstalledVersion(t *testing.T) {
+	cache := t.TempDir()
+	if _, err := NewStubs(stubFiles, "v1", cache).Roots(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if roots, err := NewStubs(stubFiles, "v1", cache).Roots(ctx); err != nil || len(roots) != 1 {
+		t.Errorf("Roots() = %v, %v; want the installed directory", roots, err)
 	}
 }

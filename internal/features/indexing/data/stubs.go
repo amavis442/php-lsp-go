@@ -1,6 +1,7 @@
 package data
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -25,11 +26,12 @@ func NewStubs(files fs.FS, version, cacheDir string) *Stubs {
 }
 
 // Roots installs the stubs when they are not installed yet and returns the
-// directory that holds them.
-func (s *Stubs) Roots() ([]string, error) {
+// directory that holds them. Installing stops when ctx is cancelled, so a
+// session that ends during a first install is not held up by it.
+func (s *Stubs) Roots(ctx context.Context) ([]string, error) {
 	root := filepath.Join(s.dir, "stubs", s.version)
 	if !installed(root) {
-		if err := s.install(root); err != nil {
+		if err := s.install(ctx, root); err != nil {
 			return nil, fmt.Errorf("installing stubs in %s: %w", root, err)
 		}
 	}
@@ -38,9 +40,12 @@ func (s *Stubs) Roots() ([]string, error) {
 
 // install writes the stubs to a temporary directory and renames it into
 // place, so another server never sees a half-written install.
-func (s *Stubs) install(root string) error {
+func (s *Stubs) install(ctx context.Context, root string) error {
 	parent := filepath.Dir(root)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	tmp, err := os.MkdirTemp(parent, s.version+".tmp-")
@@ -49,7 +54,7 @@ func (s *Stubs) install(root string) error {
 	}
 	defer os.RemoveAll(tmp) // already gone after a successful rename
 
-	if err := os.CopyFS(tmp, s.files); err != nil {
+	if err := s.copy(ctx, tmp); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(tmp, installedMarker), nil, 0o644); err != nil {
@@ -68,6 +73,27 @@ func (s *Stubs) install(root string) error {
 		return err
 	}
 	return nil
+}
+
+// copy writes the stub files under dir, checking ctx before each file.
+func (s *Stubs) copy(ctx context.Context, dir string) error {
+	return fs.WalkDir(s.files, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		target := filepath.Join(dir, filepath.FromSlash(path))
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := fs.ReadFile(s.files, path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
 func installed(root string) bool {

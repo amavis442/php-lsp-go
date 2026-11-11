@@ -12,8 +12,12 @@ tree-sitter-php grammar.
 - Document symbols (outline)
 - Workspace symbols, from an index of the whole project including `vendor/`
   and the functions, classes and constants built into PHP
+- Goto-definition for classes, functions, constants, `use` statements and
+  members reached through a class name, `self`, `static`, `parent` or
+  `$this`, following traits, parent classes and interfaces. Members of other
+  objects (`$user->name()`) need type inference and are not resolved yet.
 
-Goto-definition and hover are planned.
+Hover is planned.
 
 ## Build and test
 

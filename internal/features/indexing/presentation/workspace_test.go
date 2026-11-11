@@ -71,13 +71,22 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// fakeLibraries hands out fixed library roots.
+// fakeLibraries hands out fixed library roots. With block set, it waits
+// until ctx is cancelled, like a slow first install.
 type fakeLibraries struct {
 	roots []string
 	err   error
+	block chan struct{} // closed when Roots starts waiting
 }
 
-func (l *fakeLibraries) Roots() ([]string, error) { return l.roots, l.err }
+func (l *fakeLibraries) Roots(ctx context.Context) ([]string, error) {
+	if l.block != nil {
+		close(l.block)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return l.roots, l.err
+}
 
 type fixture struct {
 	root      string
@@ -305,6 +314,27 @@ func TestStopEndsTheWorkspaceAndIsSafeToRepeat(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stop did not return")
+	}
+}
+
+func TestStopCancelsASlowLibraryInstallQuietly(t *testing.T) {
+	f := newFixture(t)
+	f.libraries.block = make(chan struct{})
+	f.workspace.Start(server.Session{Roots: []string{fileuri.FromPath(f.root)}})
+	<-f.libraries.block
+
+	done := make(chan struct{})
+	go func() {
+		f.workspace.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop waited for the install")
+	}
+	if f.logs.String() != "" {
+		t.Errorf("log = %q, want nothing for a cancelled install", f.logs.String())
 	}
 }
 
