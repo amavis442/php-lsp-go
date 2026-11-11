@@ -34,6 +34,36 @@ On Windows, build `php-lsp-go.exe` instead.
 
 The server speaks LSP over stdin and stdout.
 
+## Use with Neovim
+
+Neovim 0.11 or later. Put the binary on your `PATH` (or use its full path in
+`cmd`), then in `init.lua`:
+
+```lua
+vim.lsp.config('php_lsp_go', {
+  cmd = { 'php-lsp-go' },
+  filetypes = { 'php' },
+  root_markers = { 'composer.json', '.git' },
+})
+vim.lsp.enable('php_lsp_go')
+-- When trying it next to another PHP server, disable that one to avoid
+-- duplicate results, for example: vim.lsp.enable('intelephense', false)
+```
+
+Open a PHP file in the project and the workspace is indexed in the
+background; Neovim shows the progress. Then `gd` jumps to a definition, `K`
+shows hover, and `:lua vim.lsp.buf.workspace_symbol()` searches the
+workspace.
+
+The first start parses every PHP file, including `vendor/`. The result is kept
+in the user cache directory (`php-lsp-go/index`), so later starts only parse
+what changed. A new build of the server starts afresh.
+
+To see what the server does: `:checkhealth vim.lsp`, and the LSP log
+(`:lua vim.cmd.edit(vim.lsp.log.get_filename())`) after
+`:lua vim.lsp.log.set_level('debug')`. The server writes its own problems to
+stderr, which ends up in that log.
+
 ## Credits
 
 Written by Amavis442, pair-programmed with Claude (Anthropic). See

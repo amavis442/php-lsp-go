@@ -8,6 +8,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/amavis442/php-lsp-go/internal/features/indexing/domain"
 )
 
 func write(t *testing.T, root, name, content string) {
@@ -24,7 +27,7 @@ func write(t *testing.T, root, name, content string) {
 func walk(t *testing.T, fs *FileSystem, root string) []string {
 	t.Helper()
 	var got []string
-	err := fs.Walk(context.Background(), root, func(p string) error {
+	err := fs.Walk(context.Background(), root, func(p string, _ domain.Stamp) error {
 		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return err
@@ -57,13 +60,32 @@ func TestWalkFindsPHPFilesAndSkipsExcludedDirectoriesAndLargeFiles(t *testing.T)
 	}
 }
 
+func TestWalkStampsEachFileWithItsSizeAndModificationTime(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "a.php", "<?php // 17 bytes")
+	when := time.Date(2026, 1, 2, 3, 4, 5, 6000, time.UTC)
+	if err := os.Chtimes(filepath.Join(root, "a.php"), when, when); err != nil {
+		t.Fatal(err)
+	}
+
+	var got domain.Stamp
+	err := NewFileSystem(nil, DefaultMaxSize).Walk(context.Background(), root, func(_ string, s domain.Stamp) error {
+		got = s
+		return nil
+	})
+
+	if err != nil || got.Size != 17 || got.ModTime != when.UnixNano() {
+		t.Errorf("stamp = %+v, %v; want 17 bytes at %d", got, err, when.UnixNano())
+	}
+}
+
 func TestWalkStopsWhenCancelled(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "a.php", "<?php")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := NewFileSystem(nil, 1<<20).Walk(ctx, root, func(string) error { return nil })
+	err := NewFileSystem(nil, 1<<20).Walk(ctx, root, func(string, domain.Stamp) error { return nil })
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
@@ -72,7 +94,7 @@ func TestWalkStopsWhenCancelled(t *testing.T) {
 
 func TestWalkOfAMissingRootFails(t *testing.T) {
 	err := NewFileSystem(nil, 1<<20).Walk(context.Background(), filepath.Join(t.TempDir(), "missing"),
-		func(string) error { return nil })
+		func(string, domain.Stamp) error { return nil })
 
 	if err == nil {
 		t.Error("Walk of a missing root succeeded, want error")

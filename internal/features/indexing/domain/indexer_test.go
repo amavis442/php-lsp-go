@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/amavis442/php-lsp-go/internal/core/fileuri"
@@ -15,13 +16,22 @@ import (
 	"github.com/amavis442/php-lsp-go/internal/core/text"
 )
 
-// fakeFiles is a file system of path -> content under the roots given.
+// fakeFiles is a file system of path -> content under the roots given. A
+// file's stamp is its length, unless stamps says otherwise.
 type fakeFiles struct {
 	files   map[string]string
+	stamps  map[string]Stamp
 	walkErr error
 }
 
-func (f fakeFiles) Walk(ctx context.Context, root string, visit func(string) error) error {
+func (f fakeFiles) stamp(p string) Stamp {
+	if s, ok := f.stamps[p]; ok {
+		return s
+	}
+	return Stamp{Size: int64(len(f.files[p]))}
+}
+
+func (f fakeFiles) Walk(ctx context.Context, root string, visit func(string, Stamp) error) error {
 	if f.walkErr != nil {
 		return f.walkErr
 	}
@@ -36,7 +46,7 @@ func (f fakeFiles) Walk(ctx context.Context, root string, visit func(string) err
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := visit(p); err != nil {
+		if err := visit(p, f.stamp(p)); err != nil {
 			return err
 		}
 	}
@@ -51,14 +61,41 @@ func (f fakeFiles) Read(path string) ([]byte, error) {
 	return []byte(content), nil
 }
 
-// functionPerFile declares one function named after the file content.
-type functionPerFile struct{}
+// functionPerFile declares one function named after the file content, and
+// counts the files it parsed.
+type functionPerFile struct {
+	parsed *atomic.Int32
+}
 
-func (functionPerFile) Extract(src []byte) (php.FileSummary, error) {
+func (f functionPerFile) Extract(src []byte) (php.FileSummary, error) {
+	if f.parsed != nil {
+		f.parsed.Add(1)
+	}
 	if string(src) == "broken" {
 		return php.FileSummary{}, errors.New("parse failure")
 	}
 	return php.FileSummary{Declarations: []php.Declaration{{Name: string(src), Kind: php.KindFunction}}}, nil
+}
+
+// fakeCache holds one saved scan in memory.
+type fakeCache struct {
+	loaded  map[string]CachedFile
+	saved   map[string]CachedFile
+	roots   []string
+	enc     text.Encoding
+	saves   int
+	saveErr error
+}
+
+func (c *fakeCache) Load(roots []string, enc text.Encoding) map[string]CachedFile {
+	c.roots, c.enc = roots, enc
+	return c.loaded
+}
+
+func (c *fakeCache) Save(roots []string, enc text.Encoding, files map[string]CachedFile) error {
+	c.saves++
+	c.saved = files
+	return c.saveErr
 }
 
 type fakeIndex struct {
@@ -114,7 +151,87 @@ func path(name string) string { return filepath.Join(root, name) }
 
 func newTestIndexer(files fakeFiles, index Index) *Indexer {
 	return NewIndexer(files, func() Extractor { return functionPerFile{} }, index,
-		func() text.Encoding { return text.UTF16 }, 3)
+		func() text.Encoding { return text.UTF16 }, 3, NoCache{})
+}
+
+func TestAScanReusesCachedFilesThatDidNotChange(t *testing.T) {
+	files := fakeFiles{files: map[string]string{
+		path("same.php"): "same", path("changed.php"): "changed", path("new.php"): "new",
+	}}
+	cached := func(name string, stamp Stamp) CachedFile {
+		return CachedFile{Stamp: stamp, Symbols: []php.WorkspaceSymbol{{Name: name, Kind: php.KindFunction}}}
+	}
+	cache := &fakeCache{loaded: map[string]CachedFile{
+		path("same.php"):    cached("fromCache", files.stamp(path("same.php"))),
+		path("changed.php"): cached("stale", Stamp{Size: 1}),
+		path("deleted.php"): cached("gone", Stamp{Size: 4}),
+	}}
+	var parsed atomic.Int32
+	index := newFakeIndex()
+	indexer := NewIndexer(files, func() Extractor { return functionPerFile{parsed: &parsed} }, index,
+		func() text.Encoding { return text.UTF8 }, 2, cache)
+
+	stats, err := indexer.IndexWorkspace(context.Background(), []string{root}, &recordedProgress{})
+
+	if err != nil {
+		t.Fatalf("IndexWorkspace: %v", err)
+	}
+	if got := strings.Join(index.names(), "; "); got != "changed.php: changed; new.php: new; same.php: fromCache" {
+		t.Errorf("index = %s", got)
+	}
+	if parsed.Load() != 2 || stats != (Stats{Files: 3, Cached: 1}) {
+		t.Errorf("parsed %d, stats %+v; want 2 parsed and 1 from the cache", parsed.Load(), stats)
+	}
+	if len(cache.roots) != 1 || cache.roots[0] != root || cache.enc != text.UTF8 {
+		t.Errorf("loaded for roots %v in %v", cache.roots, cache.enc)
+	}
+}
+
+func TestAScanSavesWhatItIndexed(t *testing.T) {
+	files := fakeFiles{files: map[string]string{path("a.php"): "alpha", path("bad.php"): "broken"}}
+	cache := &fakeCache{}
+	indexer := NewIndexer(files, func() Extractor { return functionPerFile{} }, newFakeIndex(),
+		func() text.Encoding { return text.UTF16 }, 2, cache)
+
+	if _, err := indexer.IndexWorkspace(context.Background(), []string{root}, &recordedProgress{}); err != nil {
+		t.Fatalf("IndexWorkspace: %v", err)
+	}
+
+	a, ok := cache.saved[path("a.php")]
+	if cache.saves != 1 || len(cache.saved) != 1 || !ok || a.Stamp != files.stamp(path("a.php")) ||
+		len(a.Symbols) != 1 || a.Symbols[0].Name != "alpha" || a.Symbols[0].URI != fileuri.FromPath(path("a.php")) {
+		t.Errorf("saved %d times: %+v; want a.php with its stamp and symbols, and not the broken file", cache.saves, cache.saved)
+	}
+}
+
+func TestACancelledScanSavesNothing(t *testing.T) {
+	files := fakeFiles{files: map[string]string{path("a.php"): "a"}}
+	cache := &fakeCache{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	indexer := NewIndexer(files, func() Extractor { return functionPerFile{} }, newFakeIndex(),
+		func() text.Encoding { return text.UTF16 }, 2, cache)
+
+	if _, err := indexer.IndexWorkspace(ctx, []string{root}, &recordedProgress{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if cache.saves != 0 {
+		t.Errorf("saved %d times, want none: a partial scan would hide files next time", cache.saves)
+	}
+}
+
+func TestAFailedSaveIsReportedAfterIndexing(t *testing.T) {
+	files := fakeFiles{files: map[string]string{path("a.php"): "a"}}
+	boom := errors.New("disk full")
+	index := newFakeIndex()
+	indexer := NewIndexer(files, func() Extractor { return functionPerFile{} }, index,
+		func() text.Encoding { return text.UTF16 }, 2, &fakeCache{saveErr: boom})
+
+	stats, err := indexer.IndexWorkspace(context.Background(), []string{root}, &recordedProgress{})
+
+	if !errors.Is(err, boom) || stats.Files != 1 || len(index.names()) != 1 {
+		t.Errorf("stats %+v, err %v, index %v; want the file indexed and the save error", stats, err, index.names())
+	}
 }
 
 func TestIndexWorkspaceIndexesEveryFileUnderItsCanonicalURI(t *testing.T) {

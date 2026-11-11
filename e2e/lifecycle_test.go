@@ -53,13 +53,18 @@ type process struct {
 
 func start(t *testing.T) *process {
 	t.Helper()
+	return startWithCache(t, t.TempDir())
+}
+
+// startWithCache starts the server with cache as the user cache directory
+// (LOCALAPPDATA on Windows, XDG_CACHE_HOME on Linux), so tests never touch
+// the real one and can share one between sessions.
+func startWithCache(t *testing.T, cache string) *process {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
 
 	cmd := exec.CommandContext(ctx, binary)
-	// Point the user cache directory (LOCALAPPDATA on Windows, XDG_CACHE_HOME
-	// on Linux) at a directory of the test's own.
-	cache := t.TempDir()
 	cmd.Env = append(os.Environ(), "LOCALAPPDATA="+cache, "XDG_CACHE_HOME="+cache)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

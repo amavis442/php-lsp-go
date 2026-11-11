@@ -171,7 +171,7 @@ func TestExitingWhileDiagnosticsAreInFlightLogsNothing(t *testing.T) {
 	var logs syncBuffer
 	checker := stalledChecker{started: make(chan struct{}), release: make(chan struct{})}
 	c, done := startApp(t, newApp(server.Info{Name: "php-lsp-go", Version: "test"}, log.New(&logs, "", 0),
-		time.Millisecond, checker, syntax.NewParser(), noLibraries{}))
+		time.Millisecond, checker, syntax.NewParser(), noLibraries{}, noCache))
 	notify(t, c, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{
 		"uri": docURI, "languageId": "php", "version": 1, "text": "<?php\necho 1;\n",
 	}})
